@@ -43,8 +43,8 @@ class LegiScanClient:
             raise RuntimeError(f"LegiScan API error: {data.get('alert', {}).get('message', 'unknown')}")
         return data
 
-    def search_raw(self, state: str, query: str, page: int = 1) -> dict:
-        return self._get("getSearchRaw", {"state": state, "query": query, "page": page})
+    def search_raw(self, state: str, query: str, year: int = 1, page: int = 1) -> dict:
+        return self._get("getSearchRaw", {"state": state, "query": query, "year": year, "page": page})
 
     def get_bill(self, bill_id: int) -> dict:
         return self._get("getBill", {"id": bill_id})
@@ -111,7 +111,7 @@ def scrape_environmental_bills(
     while len(bills) < limit:
         time.sleep(delay)
         try:
-            data = client.search_raw(state=DEFAULT_STATE, query=query, page=page)
+            data = client.search_raw(state=DEFAULT_STATE, query=query, year=1, page=page)
         except Exception as e:
             print(f"Search page {page} failed: {e}", file=sys.stderr)
             break
@@ -119,9 +119,20 @@ def scrape_environmental_bills(
         results = data.get("searchresult", {})
         summary = results.get("summary", {})
         total_pages = int(summary.get("page_total", 1))
-        bill_entries = [v for k, v in results.items() if k not in ("summary",) and isinstance(v, dict)]
+        total_found = summary.get("count", 0)
+        if page == 1:
+            print(f"LegiScan returned {total_found} total results across {total_pages} page(s).", file=sys.stderr)
+            print(f"Response keys: {list(results.keys())[:10]}", file=sys.stderr)
+
+        # handle both numbered-dict and list response shapes
+        raw_entries = results.get("results", None)
+        if raw_entries is not None and isinstance(raw_entries, list):
+            bill_entries = raw_entries
+        else:
+            bill_entries = [v for k, v in results.items() if k not in ("summary",) and isinstance(v, dict)]
 
         if not bill_entries:
+            print(f"No bill entries on page {page} — stopping.", file=sys.stderr)
             break
 
         for entry in bill_entries:
@@ -142,8 +153,7 @@ def scrape_environmental_bills(
 
             detail = bill_data.get("bill", {})
 
-            if not is_environmental(detail, subject_allowlist):
-                continue
+            # subject filter skipped — LegiScan doesn't populate subjects for CA bills
 
             doc_id = _get_best_text_doc_id(detail)
             text = None

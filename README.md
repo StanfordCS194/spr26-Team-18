@@ -19,8 +19,8 @@ cd frontend && npm install
 cp .env.example .env
 ```
 Fill in `.env` with your keys:
-- `LEGISCAN_API_KEY` — free registration at [legiscan.com](https://legiscan.com)
-- `ANTHROPIC_API_KEY` — from [console.anthropic.com](https://console.anthropic.com)
+- `LEGISCAN_API_KEY` — we have this in gihub secrets
+- `ANTHROPIC_API_KEY` — or OPENAI_API_KEY (gpt 4o mini works well for summaries)
 
 ---
 
@@ -40,7 +40,7 @@ Open [http://localhost:5173](http://localhost:5173).
 
 ---
 
-## Data pipeline
+## Data pipeline mainly feature 1 for now
 
 ### 1. Scrape bills (LegiScan API only)
 ```bash

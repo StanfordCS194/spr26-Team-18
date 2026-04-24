@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Landmark, Building2 } from "lucide-react";
 import TopNav from "./components/TopNav";
 import BillList from "./components/BillList";
 import PlaceholderTab from "./components/PlaceholderTab";
@@ -9,18 +10,18 @@ export default function App() {
   return (
     <>
       <TopNav activeTab={activeTab} onTabChange={setActiveTab} />
-      <main className="page">
+      <main className="mx-auto max-w-[900px] px-6 pb-20 pt-10">
         {activeTab === "bills" && <BillList />}
         {activeTab === "legislators" && (
           <PlaceholderTab
-            icon="🏛️"
+            Icon={Landmark}
             title="Legislator Tracker"
             description="See how individual California legislators have voted on environmental bills over time, with AI-generated voting pattern summaries."
           />
         )}
         {activeTab === "company" && (
           <PlaceholderTab
-            icon="🏢"
+            Icon={Building2}
             title="Company Match"
             description="Upload your 10-K or company description and get back a ranked list of environmental bills that affect your specific operations."
           />

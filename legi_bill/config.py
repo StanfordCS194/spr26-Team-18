@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 LEGISCAN_BASE_URL = "https://api.legiscan.com/"
-CLAUDE_MODEL = "claude-sonnet-4-6"
+OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_STATE = "CA"
 REQUEST_DELAY_SECONDS = 0.5
 
@@ -70,15 +70,15 @@ COMPLIANCE_QUESTIONS_PROMPT = (
 
 def load_config() -> dict:
     legiscan_key = os.getenv("LEGISCAN_API_KEY")
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    openai_key = os.getenv("OPENAI_API_KEY")
 
     if not legiscan_key:
         raise EnvironmentError(
             "LEGISCAN_API_KEY is not set. Copy .env.example to .env and fill it in."
         )
-    if not anthropic_key:
+    if not openai_key:
         raise EnvironmentError(
-            "ANTHROPIC_API_KEY is not set. Copy .env.example to .env and fill it in."
+            "OPENAI_API_KEY is not set. Copy .env.example to .env and fill it in."
         )
 
     raw_db_path = os.getenv("LEGI_BILL_DB_PATH", "~/.legi_bill/bills.db")
@@ -87,6 +87,6 @@ def load_config() -> dict:
 
     return {
         "legiscan_api_key": legiscan_key,
-        "anthropic_api_key": anthropic_key,
+        "openai_api_key": openai_key,
         "db_path": db_path,
     }

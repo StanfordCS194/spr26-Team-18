@@ -2,7 +2,7 @@ import json
 import sys
 from datetime import datetime
 
-import anthropic
+from openai import OpenAI
 import click
 
 from .config import load_config, ENVIRONMENTAL_KEYWORDS, ENVIRONMENTAL_SUBJECTS
@@ -59,7 +59,7 @@ def summarize_cmd(bill_number, process_all, force):
 
     cfg = load_config()
     conn = init_db(cfg["db_path"])
-    client = anthropic.Anthropic(api_key=cfg["anthropic_api_key"])
+    client = OpenAI(api_key=cfg["openai_api_key"])
 
     if bill_number:
         bill = get_bill_by_number(conn, bill_number)
@@ -69,6 +69,12 @@ def summarize_cmd(bill_number, process_all, force):
         bills = [bill]
     else:
         bills = get_bills_without_summary(conn) if not force else get_all_bills(conn)
+
+    SKIP_PATTERNS = ["budget act", "trailer bill"]
+    bills = [
+        b for b in bills
+        if not any(p in b.title.lower() for p in SKIP_PATTERNS)
+    ]
 
     if not bills:
         click.echo("No bills to process.")

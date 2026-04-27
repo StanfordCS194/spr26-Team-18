@@ -70,7 +70,7 @@ def rank_bills(
     scored: List[Tuple[Bill, float]] = []
     for bill, summary_text in bills_with_summary:
         subjects = " ".join(bill.subjects) if bill.subjects else ""
-        corpus = f"{bill.title} {bill.description} {subjects} {summary_text}"
+        corpus = f"{bill.title} {bill.description} {subjects} {summary_text} {bill.text or ''}"
         bill_tokens = _tokenize(corpus)
         if not bill_tokens:
             scored.append((bill, 0.0))

@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Landmark, Building2 } from "lucide-react";
+import { Landmark } from "lucide-react";
 import TopNav from "./components/TopNav";
 import BillList from "./components/BillList";
+import CompanyMatch from "./components/CompanyMatch";
 import PlaceholderTab from "./components/PlaceholderTab";
 
 export default function App() {
@@ -19,13 +20,7 @@ export default function App() {
             description="See how individual California legislators have voted on environmental bills over time, with AI-generated voting pattern summaries."
           />
         )}
-        {activeTab === "company" && (
-          <PlaceholderTab
-            Icon={Building2}
-            title="Company Match"
-            description="Upload your 10-K or company description and get back a ranked list of environmental bills that affect your specific operations."
-          />
-        )}
+        {activeTab === "company" && <CompanyMatch />}
       </main>
     </>
   );

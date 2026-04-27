@@ -8,6 +8,12 @@ const STATUS_STYLES = {
   default: "bg-status-default-bg text-status-default-text",
 };
 
+const TIER_STYLES = {
+  High: "bg-status-chaptered-bg text-status-chaptered-text",
+  Medium: "bg-status-committee-bg text-status-committee-text",
+  Low: "bg-status-default-bg text-status-default-text",
+};
+
 function statusKey(status) {
   const s = (status || "").toLowerCase();
   if (s.includes("chaptered")) return "chaptered";
@@ -16,7 +22,7 @@ function statusKey(status) {
   return "default";
 }
 
-export default function BillCard({ bill }) {
+export default function BillCard({ bill, relevance }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -39,6 +45,17 @@ export default function BillCard({ bill }) {
         </span>
       </div>
       <div className="mt-2.5 flex flex-wrap items-center gap-2.5">
+        {relevance && (
+          <span
+            className={
+              "rounded-full px-2.5 py-[3px] text-xs font-semibold " +
+              TIER_STYLES[relevance.tier]
+            }
+            title={`Relevance score: ${relevance.score}`}
+          >
+            {relevance.tier} relevance
+          </span>
+        )}
         <span
           className={
             "rounded-full px-2.5 py-[3px] text-xs font-semibold " +

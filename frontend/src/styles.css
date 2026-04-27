@@ -4,41 +4,52 @@
 
 @layer base {
   :root {
-    --text-primary: #102133;
-    --text-secondary: #5a6a7a;
-    --text-muted: #8a9ab0;
+    /* ── Text ── */
+    --text-primary: #2d2d44;
+    --text-secondary: #6b6885;
+    --text-muted: #a09cb5;
     --text-invert: #ffffff;
 
+    /* ── Surfaces ── */
     --bg-card: #ffffff;
-    --bg-nav: #102133;
-    --bg-action: #f2c45a;
-    --bg-action-dark: #102133;
-    --bg-chip: #f4f7fa;
-    --bg-chip-alt: #f0f3f7;
+    --bg-nav: #efe9f6;          /* sidebar (soft lavender) */
+    --bg-action: #c9b6e8;       /* primary accent (muted lavender) */
+    --bg-action-dark: #8b7cb6;  /* CTA buttons (deeper lavender) */
+    --bg-chip: #f6f1f9;
+    --bg-chip-alt: #f1ecf5;
 
-    --border-border: #d0d8e4;
-    --border-muted: #eaecef;
-    --border-chip: #c8d4e0;
+    /* ── Borders ── */
+    --border-border: #ece6f0;
+    --border-muted: #f1edf4;
+    --border-chip: #e1d8ea;
 
-    --accent-gold: #f2c45a;
-    --accent-gold-soft: rgba(242, 196, 90, 0.5);
+    /* ── Accents ── */
+    --accent-gold: #f4b9a0;       /* peach (replaces gold) */
+    --accent-gold-soft: rgba(244, 185, 160, 0.55);
 
-    --status-chaptered-bg: #d4f0e0;
-    --status-chaptered-text: #1a6640;
-    --status-enrolled-bg: #d4e8f7;
-    --status-enrolled-text: #1a4a6e;
-    --status-committee-bg: #fff3cc;
-    --status-committee-text: #7a5a00;
-    --status-default-bg: #eaecef;
-    --status-default-text: #4a5568;
+    /* ── Status pills (soft pastel) ── */
+    --status-chaptered-bg: #d4e7d2;
+    --status-chaptered-text: #527a4d;
+    --status-enrolled-bg: #d8d2eb;
+    --status-enrolled-text: #5c4f7c;
+    --status-committee-bg: #f7e0c9;
+    --status-committee-text: #8b5e3a;
+    --status-default-bg: #ebe7ed;
+    --status-default-text: #6e6a78;
   }
 
   body {
-    @apply font-sans text-text-primary bg-page min-h-screen;
+    @apply font-sans text-text-primary bg-page min-h-screen antialiased;
   }
 }
 
 @layer utilities {
   @keyframes spin-slow { to { transform: rotate(360deg); } }
   .animate-spin-slow { animation: spin-slow 0.7s linear infinite; }
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-in { animation: fade-in 0.25s ease-out both; }
 }

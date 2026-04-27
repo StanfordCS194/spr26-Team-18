@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { MessageCircle } from "lucide-react";
 import BillDetail from "./BillDetail";
 
 const STATUS_STYLES = {
@@ -8,7 +9,13 @@ const STATUS_STYLES = {
   default: "bg-status-default-bg text-status-default-text",
 };
 
-const TIER_STYLES = {
+const TIER_DOT = {
+  High: "bg-status-chaptered-text",
+  Medium: "bg-status-committee-text",
+  Low: "bg-status-default-text",
+};
+
+const TIER_BG = {
   High: "bg-status-chaptered-bg text-status-chaptered-text",
   Medium: "bg-status-committee-bg text-status-committee-text",
   Low: "bg-status-default-bg text-status-default-text",
@@ -22,43 +29,42 @@ function statusKey(status) {
   return "default";
 }
 
-export default function BillCard({ bill, relevance }) {
+export default function BillCard({ bill, relevance, onChatAbout }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <div
       onClick={() => setExpanded((e) => !e)}
       className={
-        "cursor-pointer rounded-[14px] border-[1.5px] bg-card px-5 py-[18px] shadow-card transition-all " +
+        "cursor-pointer rounded-2xl border bg-card px-6 py-5 shadow-card transition-all " +
         "hover:shadow-card-hover " +
-        (expanded
-          ? "border-accent-gold"
-          : "border-transparent hover:border-text-primary")
+        (expanded ? "border-accent-gold" : "border-border-muted hover:border-border-chip")
       }
     >
       <div className="flex items-start gap-3.5">
-        <span className="flex-shrink-0 whitespace-nowrap rounded-md bg-action-dark px-2.5 py-[3px] text-[13px] font-bold text-white">
+        <span className="flex-shrink-0 whitespace-nowrap rounded-lg bg-action px-2.5 py-1 text-[12px] font-bold text-text-primary">
           {bill.bill_number}
         </span>
         <span className="flex-1 text-[15px] font-semibold leading-snug text-text-primary">
           {bill.title}
         </span>
       </div>
-      <div className="mt-2.5 flex flex-wrap items-center gap-2.5">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         {relevance && (
           <span
             className={
-              "rounded-full px-2.5 py-[3px] text-xs font-semibold " +
-              TIER_STYLES[relevance.tier]
+              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold " +
+              TIER_BG[relevance.tier]
             }
             title={`Relevance score: ${relevance.score}`}
           >
+            <span className={"h-1.5 w-1.5 rounded-full " + TIER_DOT[relevance.tier]} />
             {relevance.tier} relevance
           </span>
         )}
         <span
           className={
-            "rounded-full px-2.5 py-[3px] text-xs font-semibold " +
+            "rounded-full px-2.5 py-1 text-[11px] font-semibold " +
             STATUS_STYLES[statusKey(bill.status)]
           }
         >
@@ -67,12 +73,27 @@ export default function BillCard({ bill, relevance }) {
         {bill.subjects?.slice(0, 3).map((s) => (
           <span
             key={s}
-            className="rounded-full border border-border-chip bg-chip px-2.5 py-[2px] text-[11px] text-[#4a607a]"
+            className="rounded-full border border-border-chip bg-chip px-2.5 py-1 text-[11px] text-text-secondary"
           >
             {s}
           </span>
         ))}
       </div>
+      {onChatAbout && (
+        <div className="mt-3 flex justify-end">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onChatAbout(bill);
+            }}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border-chip bg-chip-alt px-3 py-1.5 text-[12px] font-semibold text-text-secondary transition-colors hover:border-action-dark hover:bg-card hover:text-action-dark"
+          >
+            <MessageCircle className="h-3.5 w-3.5" />
+            Chat about this bill
+          </button>
+        </div>
+      )}
       {expanded && <BillDetail billNumber={bill.bill_number} />}
     </div>
   );

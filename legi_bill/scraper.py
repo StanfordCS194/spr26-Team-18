@@ -71,6 +71,9 @@ def build_search_query(keywords: list) -> str:
     return " OR ".join(f'"{kw}"' for kw in keywords)
 
 
+SKIP_TITLE_PATTERNS = ("budget act", "trailer bill", "maintenance of the codes")
+
+
 def is_environmental(bill_detail: dict, subject_allowlist: set) -> bool:
     subjects = [s["subject_name"] for s in bill_detail.get("subjects", [])]
     return bool(set(subjects) & subject_allowlist)
@@ -154,6 +157,9 @@ def scrape_environmental_bills(
             detail = bill_data.get("bill", {})
 
             # subject filter skipped — LegiScan doesn't populate subjects for CA bills
+            title_lc = (detail.get("title") or "").lower()
+            if any(p in title_lc for p in SKIP_TITLE_PATTERNS):
+                continue
 
             doc_id = _get_best_text_doc_id(detail)
             text = None

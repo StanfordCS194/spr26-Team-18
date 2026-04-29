@@ -361,6 +361,12 @@ function scoresOnly(axesObj) {
   return AXES.reduce((o, a) => ({ ...o, [a]: axesObj[a]?.score || 0 }), {});
 }
 
+// Underlying scores are exposure (higher = worse). The UI shows safety
+// (100 − exposure) so a bigger radar blob = safer, matching reader intuition.
+function toSafety(scores) {
+  return AXES.reduce((o, a) => ({ ...o, [a]: 100 - (scores[a] || 0) }), {});
+}
+
 // Build a compact context blob from a graded company that we can ship to the
 // chat agent as preload, so "Chat about SB-X" answers in-context instead of
 // generically. Pulls company name + the strongest 10-K quotes from each axis.
@@ -579,8 +585,13 @@ function Methodology() {
     <div className="mt-3 max-w-[760px] rounded-2xl border border-border bg-card p-5 shadow-card">
       <div className="text-[13px] leading-relaxed text-text-secondary">
         <p className="mb-2">
-          <span className="font-semibold text-text-primary">Per-axis score (0–100):</span> exposure of the company's operations to that regulatory axis,
-          based on overlap between the company's 10-K (or featured profile) and the bill text + bill subjects.
+          <span className="font-semibold text-text-primary">Per-axis score (0–100):</span> safety on that regulatory axis —
+          higher is better. We compute exposure from the overlap between the company's 10-K
+          (or featured profile) and the bill text + subjects, then display{" "}
+          <span className="font-mono">100 − exposure</span>. Bars in
+          <span className="text-red-600 font-medium"> red</span> ({"≤"}25) and
+          <span className="text-orange-500 font-medium"> orange</span> ({"≤"}50)
+          flag the highest-risk axes.
         </p>
         <p className="mb-2">
           <span className="font-semibold text-text-primary">Composite:</span> weighted average across the 5 axes.
@@ -756,6 +767,7 @@ function RevealStage({
 }) {
   const showRadar = step !== "scanning";
   const showGrade = step === "revealed";
+  const safetyScores = toSafety(animatedScores);
 
   return (
     <div className="space-y-6">
@@ -785,7 +797,7 @@ function RevealStage({
             </div>
           )}
           <div className="relative flex items-center justify-center">
-            <RegRadar scores={animatedScores} animate={showRadar} />
+            <RegRadar scores={safetyScores} animate={showRadar} />
           </div>
 
           <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -793,7 +805,7 @@ function RevealStage({
               <AxisBar
                 key={a}
                 axis={a}
-                score={animatedScores[a]}
+                score={safetyScores[a]}
                 highlight={a === "disclosure"}
                 clickable={showGrade}
                 active={drilldownAxis === a}
@@ -836,7 +848,7 @@ function RevealStage({
       {showGrade && drilldownAxis && (
         <AxisDrilldown
           axis={drilldownAxis}
-          score={animatedScores[drilldownAxis]}
+          score={safetyScores[drilldownAxis]}
           evidence={company.axes[drilldownAxis]?.evidence || []}
           onClose={() => setDrilldownAxis(null)}
           onChatAboutBill={onChatAboutBill}
@@ -862,9 +874,17 @@ function ScanMarquee() {
   );
 }
 
+function riskTone(safetyScore) {
+  if (safetyScore <= 25) return { num: "text-red-600", bar: "bg-red-500" };
+  if (safetyScore <= 50) return { num: "text-orange-500", bar: "bg-orange-400" };
+  return { num: "text-text-primary", bar: null };
+}
+
 function AxisBar({ axis, score, highlight, clickable, active, onClick }) {
   const pct = Math.max(0, Math.min(100, score));
+  const tone = riskTone(pct);
   const Wrapper = clickable ? "button" : "div";
+  const barColor = tone.bar || (highlight ? "bg-accent-gold" : "bg-action-dark");
   return (
     <Wrapper
       type={clickable ? "button" : undefined}
@@ -881,14 +901,11 @@ function AxisBar({ axis, score, highlight, clickable, active, onClick }) {
       </div>
       <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-chip-alt">
         <div
-          className={
-            "absolute inset-y-0 left-0 rounded-full " +
-            (highlight ? "bg-accent-gold" : "bg-action-dark")
-          }
+          className={"absolute inset-y-0 left-0 rounded-full " + barColor}
           style={{ width: `${pct}%`, transition: "width 0.06s linear" }}
         />
       </div>
-      <div className="w-9 text-right font-mono text-[13px] tabular-nums text-text-primary">
+      <div className={"w-9 text-right font-mono text-[13px] tabular-nums " + tone.num}>
         {pct}
       </div>
     </Wrapper>

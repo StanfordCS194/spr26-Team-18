@@ -65,4 +65,35 @@
     100% { opacity: 1; transform: scale(1) rotate(-3deg); }
   }
   .grade-stamp { animation: grade-stamp 0.55s cubic-bezier(0.16,1,0.3,1) both; }
+
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .animate-slide-up { animation: slide-up 0.5s cubic-bezier(0.16,1,0.3,1) both; }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50%       { transform: translateY(-5px); }
+  }
+  .animate-float { animation: float 3s ease-in-out infinite; }
+
+  @keyframes shimmer-text {
+    0%   { background-position: -200% center; }
+    100% { background-position:  200% center; }
+  }
+  .animate-shimmer-text {
+    background: linear-gradient(
+      90deg,
+      var(--text-primary) 0%,
+      var(--accent-gold) 35%,
+      #c9b6e8 55%,
+      var(--text-primary) 80%
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: shimmer-text 4s linear infinite;
+  }
 }

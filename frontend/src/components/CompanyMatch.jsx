@@ -10,7 +10,7 @@ const GREETING = {
 
 const INITIAL_VISIBLE = 5;
 
-export default function CompanyMatch() {
+export default function CompanyMatch({ preloadBill, onPreloadConsumed } = {}) {
   const [messages, setMessages] = useState([GREETING]);
   const [input, setInput] = useState("");
   const [file, setFile] = useState(null);
@@ -23,6 +23,39 @@ export default function CompanyMatch() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, loading]);
+
+  // Consume a preloaded bill (e.g. handed off from Grade Reveal).
+  useEffect(() => {
+    if (!preloadBill) return;
+    if (loading) return;
+    const ctx = preloadBill._context;
+    let content;
+    if (ctx && ctx.company_name) {
+      const quoteLines = (ctx.quotes || [])
+        .map((q) => `- (${q.axis}) "${q.quote}"`)
+        .join("\n");
+      content = [
+        `I'm looking at California regulatory exposure for ${ctx.company_name}.`,
+        ctx.grade ? `Their composite exposure grade so far is ${ctx.grade} (${ctx.composite}/100).` : "",
+        quoteLines ? `From their 10-K:\n${quoteLines}` : "",
+        `Tell me more about ${preloadBill.bill_number}: ${preloadBill.title} — what does it require, and what does ${ctx.company_name} specifically need to do?`,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+    } else {
+      content = `Tell me more about ${preloadBill.bill_number}: ${preloadBill.title}`;
+    }
+    const userMsg = { role: "user", content };
+    setMessages((prev) => {
+      // Avoid duplicate handoff if the same bill is preloaded twice.
+      if (prev.length > 0 && prev[prev.length - 1].content === content) return prev;
+      const next = [...prev, userMsg];
+      postChat(next, null);
+      return next;
+    });
+    onPreloadConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preloadBill]);
 
   async function postChat(history, sentFile) {
     setLoading(true);

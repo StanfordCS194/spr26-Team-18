@@ -1,5 +1,6 @@
 import json as _json
 from io import BytesIO
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
@@ -9,6 +10,7 @@ from pypdf import PdfReader
 
 from app.ranking import rank_bills
 from .config import OPENAI_MODEL, load_config
+from .grader import grade_company
 from .storage import init_db, get_all_bills, get_bill_with_summary_and_questions
 
 app = FastAPI(title="Legi-Bill API")
@@ -304,6 +306,92 @@ def match_chat(
         return {"message": msg.content or "", "matches": matches}
 
     raise HTTPException(500, "Chat tool-call loop did not converge")
+
+
+@app.post("/api/grade")
+def grade(
+    company_text: Optional[str] = Form(None),
+    company_name: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+):
+    """Score a company across the 5 regulatory exposure axes with evidence.
+
+    Accepts either a 10-K file (PDF or text) or a free-text company description.
+    Returns axis scores, per-axis evidence (which bills, rationale, quoted
+    snippets), composite score, letter grade, and top-3 bills overall.
+    """
+    text = ""
+    fname = None
+    if file is not None and file.filename:
+        try:
+            text = _extract_text(file)
+            fname = file.filename
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Could not read file: {e}")
+    elif company_text:
+        text = company_text
+
+    if not text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Provide a non-empty file or company_text.",
+        )
+
+    cfg = load_config()
+    api_key = cfg.get("openai_api_key", "")
+    if not api_key or api_key.startswith("stub"):
+        raise HTTPException(
+            503,
+            "OPENAI_API_KEY is not configured. Set a real key in .env to enable grading.",
+        )
+
+    # Use the same enrichment pattern as /api/match — bills + their summary text
+    # if available — so the ranker has the richest possible corpus to match against.
+    conn = get_conn()
+    bills = get_all_bills(conn)
+    enriched = []
+    for b in bills:
+        rec = get_bill_with_summary_and_questions(conn, b.bill_number)
+        summary_text = rec["summary"]["summary_text"] if rec and rec.get("summary") else ""
+        enriched.append((b, summary_text))
+
+    name = company_name or (fname.rsplit(".", 1)[0] if fname else None)
+
+    try:
+        client = OpenAI(api_key=api_key)
+        result = grade_company(client, enriched, text, company_name=name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"Grading failed: {e}")
+
+    return result
+
+
+@app.get("/api/grade/featured")
+def list_featured():
+    """Return all baked featured-company grades (cached on disk)."""
+    cache_path = Path(__file__).parent / "data" / "featured_grades.json"
+    if not cache_path.exists():
+        raise HTTPException(404, "No featured grades baked yet. Run `python -m legi_bill.bake_featured`.")
+    with open(cache_path) as f:
+        data = _json.load(f)
+    # Return as a list, ordered by ticker for stable display.
+    return [data[ticker] for ticker in sorted(data.keys())]
+
+
+@app.get("/api/grade/featured/{ticker}")
+def get_featured(ticker: str):
+    """Return one baked featured grade by ticker."""
+    cache_path = Path(__file__).parent / "data" / "featured_grades.json"
+    if not cache_path.exists():
+        raise HTTPException(404, "No featured grades baked.")
+    with open(cache_path) as f:
+        data = _json.load(f)
+    payload = data.get(ticker.upper())
+    if not payload:
+        raise HTTPException(404, f"Featured ticker {ticker} not in cache.")
+    return payload
 
 
 @app.get("/api/bills/{bill_number}")

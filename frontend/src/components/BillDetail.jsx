@@ -139,17 +139,30 @@ function BillTimeline({ history }) {
 export default function BillDetail({ billNumber }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setNotFound(false);
+    setData(null);
     fetch(`/api/bills/${billNumber}`)
       .then((r) => {
+        if (r.status === 404) {
+          setNotFound(true);
+          setLoading(false);
+          return null;
+        }
         if (!r.ok) throw new Error("Failed to load bill");
         return r.json();
       })
-      .then((d) => { setData(d); setLoading(false); })
+      .then((d) => {
+        if (d) {
+          setData(d);
+          setLoading(false);
+        }
+      })
       .catch((e) => { setError(e.message); setLoading(false); });
   }, [billNumber]);
 

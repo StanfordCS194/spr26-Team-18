@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import { Landmark } from "lucide-react";
 import Sidebar from "./components/Sidebar";
+import Home from "./components/Home";
 import BillList from "./components/BillList";
 import CompanyMatch from "./components/CompanyMatch";
 import GradeReveal from "./components/GradeReveal";
 import PlaceholderTab from "./components/PlaceholderTab";
 
-const TAB_IDS = ["bills", "legislators", "company", "grade"];
+const TAB_IDS = ["home", "bills", "legislators", "company", "grade"];
 
 function tabFromHash() {
   const h = (typeof window !== "undefined" ? window.location.hash : "").slice(1);
-  return TAB_IDS.includes(h) ? h : "bills";
+  return TAB_IDS.includes(h) ? h : "home";
 }
 
 export default function App() {
@@ -40,6 +41,7 @@ export default function App() {
       <Sidebar activeTab={activeTab} onTabChange={changeTab} />
       <main className="ml-60 px-10 pb-20 pt-10">
         <div className="mx-auto max-w-[1080px] animate-fade-in" key={activeTab}>
+          {activeTab === "home" && <Home onTabChange={changeTab} />}
           {activeTab === "bills" && <BillList />}
           {activeTab === "legislators" && (
             <PlaceholderTab

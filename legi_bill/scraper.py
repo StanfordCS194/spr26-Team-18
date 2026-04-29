@@ -1,4 +1,5 @@
 import base64
+import re
 import sys
 import time
 from html.parser import HTMLParser
@@ -212,4 +213,157 @@ def scrape_environmental_bills(
         page += 1
 
     print(f"Done. {len(bills)} environmental bills collected.", file=sys.stderr)
+    return bills
+
+
+# CA bill numbers get reused across legislative sessions (SB-253 in 2021 was
+# about military officers; the SB-253 we want is the 2023 Climate Corporate
+# Data Accountability Act). LegiScan search ranks across all sessions, so we
+# pin known climate-relevant bills to their session year for an exact match.
+KNOWN_CA_BILL_YEARS = {
+    "SB253": 2023,   # Climate Corporate Data Accountability Act
+    "SB261": 2023,   # Greenhouse Gases: Climate-Related Financial Risk
+    "SB54": 2022,    # Plastic Pollution Producer Responsibility
+    "AB1305": 2023,  # Voluntary Carbon Market Disclosures
+    "SB1137": 2022,  # Oil & Gas Setback Buffer Zones
+    "SB1383": 2016,  # Short-Lived Climate Pollutants: methane: dairy
+    "AB1080": 2019,  # Single-Use Packaging Reduction
+    "SB707": 2024,   # Responsible Textile Recovery Act
+    "AB2782": 2022,  # Workplace heat / labor-environment
+    "AB32": 2006,    # Global Warming Solutions Act (landmark)
+}
+
+
+def _search_for_bill_number(client: LegiScanClient, bill_number: str, state: str = DEFAULT_STATE) -> Optional[dict]:
+    """Find a bill in LegiScan by its bill_number (e.g. "SB253" or "SB-253").
+
+    LegiScan search results only include bill_id + relevance + change_hash, NOT
+    bill_number. Strategy: search with hyphen format (which yields high-relevance
+    matches), then fetch the top-relevance candidates and check bill_number.
+
+    For known climate bills, we constrain by session year via KNOWN_CA_BILL_YEARS
+    to disambiguate from re-used bill numbers in older sessions.
+    """
+    normalized = bill_number.replace("-", "").replace(" ", "").upper()
+    # LegiScan search works better with the hyphenated form ("SB-253" returns
+    # 13 hits ranked by relevance; "SB253" returns 0).
+    if not bill_number.startswith(("SB-", "AB-", "ACR-", "AJR-", "SCR-", "SJR-")):
+        # Insert a hyphen between letters and digits.
+        m = re.match(r"^([A-Za-z]+)(\d+)$", normalized)
+        if m:
+            query = f"{m.group(1)}-{m.group(2)}"
+        else:
+            query = bill_number
+    else:
+        query = bill_number
+
+    # Constrain by session year if we have one for this known bill; else search all years.
+    year_param = KNOWN_CA_BILL_YEARS.get(normalized, 1)
+
+    try:
+        data = client.search_raw(state=state, query=query, year=year_param, page=1)
+    except Exception as e:
+        print(f"  search for {bill_number} failed: {e}", file=sys.stderr)
+        return None
+
+    results = data.get("searchresult", {})
+    raw_entries = results.get("results", None)
+    if raw_entries is not None and isinstance(raw_entries, list):
+        entries = raw_entries
+    else:
+        entries = [v for k, v in results.items() if k not in ("summary",) and isinstance(v, dict)]
+
+    if not entries:
+        return None
+
+    # Sort by relevance descending and probe the top candidates with getBill.
+    entries_with_rel = [
+        (int(e.get("relevance", 0)), e) for e in entries if e.get("bill_id")
+    ]
+    entries_with_rel.sort(key=lambda x: -x[0])
+
+    PROBE_LIMIT = 5
+    for _, entry in entries_with_rel[:PROBE_LIMIT]:
+        bill_id = entry.get("bill_id")
+        try:
+            bill_data = client.get_bill(bill_id)
+        except Exception:
+            continue
+        detail = bill_data.get("bill", {})
+        candidate = (detail.get("bill_number") or "").replace("-", "").replace(" ", "").upper()
+        if candidate == normalized:
+            # Stash the detail so the caller can skip a redundant getBill.
+            return {"bill_id": bill_id, "_detail": detail}
+
+    return None
+
+
+def fetch_specific_bills(
+    api_key: str,
+    bill_numbers: list,
+    delay: float = 0.5,
+) -> list:
+    """Fetch a known list of bills by bill_number (e.g. ['SB253', 'SB54', 'AB1305']).
+
+    Each one is searched by number, then the full detail + text is pulled
+    just like in scrape_environmental_bills. Returns Bill objects.
+    """
+    client = LegiScanClient(api_key)
+    bills = []
+
+    for bn in bill_numbers:
+        time.sleep(delay)
+        hit = _search_for_bill_number(client, bn)
+        if not hit:
+            print(f"  {bn}: not found in LegiScan search.", file=sys.stderr)
+            continue
+
+        bill_id = hit.get("bill_id")
+        if not bill_id:
+            print(f"  {bn}: search hit had no bill_id.", file=sys.stderr)
+            continue
+
+        # _search_for_bill_number probes via getBill and stashes the result.
+        detail = hit.get("_detail")
+        if detail is None:
+            time.sleep(delay)
+            try:
+                bill_data = client.get_bill(bill_id)
+            except Exception as e:
+                print(f"  getBill({bill_id}) failed: {e}", file=sys.stderr)
+                continue
+            detail = bill_data.get("bill", {})
+
+        doc_id = _get_best_text_doc_id(detail)
+        text = None
+        if doc_id:
+            time.sleep(delay)
+            try:
+                text = client.get_bill_text(doc_id)
+                if text is None:
+                    print(f"  {bn}: PDF text skipped, using description.", file=sys.stderr)
+            except Exception as e:
+                print(f"  getBillText({doc_id}) failed: {e}", file=sys.stderr)
+
+        subjects = [s["subject_name"] for s in detail.get("subjects", [])]
+        bill_session_year = 0
+        if "session" in detail:
+            bill_session_year = int(detail["session"].get("year_start", 0))
+
+        bill = Bill(
+            bill_id=bill_id,
+            bill_number=detail.get("bill_number", bn),
+            title=detail.get("title", ""),
+            description=detail.get("description", ""),
+            state=detail.get("state", DEFAULT_STATE),
+            status=detail.get("status", ""),
+            session_year=bill_session_year,
+            url=detail.get("url", ""),
+            subjects=subjects,
+            text=text or detail.get("description", ""),
+            text_doc_id=doc_id,
+        )
+        bills.append(bill)
+        print(f"  {bn} → {bill.bill_number}: {bill.title[:60]}", file=sys.stderr)
+
     return bills

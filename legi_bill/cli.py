@@ -6,7 +6,7 @@ from openai import OpenAI
 import click
 
 from .config import load_config, ENVIRONMENTAL_KEYWORDS, ENVIRONMENTAL_SUBJECTS
-from .scraper import scrape_environmental_bills
+from .scraper import scrape_environmental_bills, fetch_specific_bills
 from .storage import (
     init_db,
     upsert_bill,
@@ -46,6 +46,18 @@ def scrape_cmd(session, keywords, limit):
     for bill in bills:
         upsert_bill(conn, bill)
     click.echo(f"Scraped and stored {len(bills)} environmental bills.")
+
+
+@cli.command("scrape-bills")
+@click.argument("bill_numbers", nargs=-1, required=True)
+def scrape_bills_cmd(bill_numbers):
+    """Fetch specific CA bills by number (e.g. SB253 SB54 AB1305) into the local DB."""
+    cfg = load_config()
+    conn = init_db(cfg["db_path"])
+    bills = fetch_specific_bills(api_key=cfg["legiscan_api_key"], bill_numbers=list(bill_numbers))
+    for bill in bills:
+        upsert_bill(conn, bill)
+    click.echo(f"Fetched and stored {len(bills)} bill(s) of {len(bill_numbers)} requested.")
 
 
 @cli.command("summarize")

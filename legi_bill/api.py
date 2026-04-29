@@ -41,6 +41,7 @@ def list_bills(session: Optional[int] = None):
             "session_year": b.session_year,
             "subjects": b.subjects,
             "url": b.url,
+            "category": b.category,
         }
         for b in bills
     ]
@@ -62,6 +63,7 @@ def search_bills(q: str = Query(..., min_length=1)):
             "session_year": b.session_year,
             "subjects": b.subjects,
             "url": b.url,
+            "category": b.category,
         }
         for b in results
     ]
@@ -320,6 +322,8 @@ def get_bill(bill_number: str):
         "session_year": b.session_year,
         "subjects": b.subjects,
         "url": b.url,
+        "history": b.history,
         "summary": result["summary"]["summary_text"] if result["summary"] else None,
+        "metadata": result["summary"]["metadata"] if result["summary"] else {},
         "compliance_questions": [q["question_text"] for q in result["questions"]],
     }

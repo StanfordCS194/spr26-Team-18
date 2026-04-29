@@ -32,7 +32,7 @@ def cli():
 def scrape_cmd(session, keywords, limit):
     """Scrape California environmental bills from LegiScan into the local DB."""
     cfg = load_config()
-    conn = init_db(cfg["db_path"])
+    conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
     kw_list = keywords.split() if keywords else ENVIRONMENTAL_KEYWORDS
     year = int(session) if session else datetime.now().year
 
@@ -53,7 +53,7 @@ def scrape_cmd(session, keywords, limit):
 def scrape_bills_cmd(bill_numbers):
     """Fetch specific CA bills by number (e.g. SB253 SB54 AB1305) into the local DB."""
     cfg = load_config()
-    conn = init_db(cfg["db_path"])
+    conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
     bills = fetch_specific_bills(api_key=cfg["legiscan_api_key"], bill_numbers=list(bill_numbers))
     for bill in bills:
         upsert_bill(conn, bill)
@@ -70,7 +70,7 @@ def summarize_cmd(bill_number, process_all, force):
         raise click.UsageError("Provide --bill <number> or --all.")
 
     cfg = load_config()
-    conn = init_db(cfg["db_path"])
+    conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
     client = OpenAI(api_key=cfg["openai_api_key"])
 
     if bill_number:
@@ -118,7 +118,7 @@ def summarize_cmd(bill_number, process_all, force):
 def show_cmd(bill_number, fmt):
     """Display a bill with its summary and compliance questions."""
     cfg = load_config()
-    conn = init_db(cfg["db_path"])
+    conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
     result = get_bill_with_summary_and_questions(conn, bill_number)
 
     if not result:
@@ -172,7 +172,7 @@ def show_cmd(bill_number, fmt):
 def list_cmd(session, fmt):
     """List all bills in the database."""
     cfg = load_config()
-    conn = init_db(cfg["db_path"])
+    conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
     year = int(session) if session else None
     bills = get_all_bills(conn, session_year=year)
 
@@ -198,7 +198,7 @@ def list_cmd(session, fmt):
 def export_cmd(output):
     """Export all bills, summaries, and compliance questions to a JSON file."""
     cfg = load_config()
-    conn = init_db(cfg["db_path"])
+    conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
     bills = get_all_bills(conn)
 
     records = []

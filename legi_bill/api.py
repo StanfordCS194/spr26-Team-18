@@ -28,7 +28,7 @@ def get_conn():
     global _conn
     if _conn is None:
         cfg = load_config()
-        _conn = init_db(cfg["db_path"])
+        _conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
     return _conn
 
 

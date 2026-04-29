@@ -3,7 +3,98 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
+import requests as _requests
+
 from .models import Bill, BillSummary, ComplianceQuestion
+
+
+class _TursoRow:
+    def __init__(self, cols, cells):
+        self._d = dict(zip(cols, cells))
+
+    def __getitem__(self, k):
+        return self._d[k]
+
+    def keys(self):
+        return self._d.keys()
+
+
+class _TursoCursor:
+    def __init__(self, cols, rows):
+        self._rows = [_TursoRow(cols, r) for r in rows]
+        self._i = 0
+
+    def fetchone(self):
+        if self._i < len(self._rows):
+            r = self._rows[self._i]; self._i += 1; return r
+        return None
+
+    def fetchall(self):
+        return self._rows
+
+
+class _TursoConn:
+    """Thin sqlite3-compatible wrapper around the Turso HTTP pipeline API."""
+
+    def __init__(self, url: str, auth_token: str):
+        self._url = url.replace("libsql://", "https://") + "/v2/pipeline"
+        self._headers = {
+            "Authorization": f"Bearer {auth_token}",
+            "Content-Type": "application/json",
+        }
+        self.row_factory = None  # accepted but unused; rows always use _TursoRow
+
+    @staticmethod
+    def _arg(v):
+        if v is None:
+            return {"type": "null"}
+        if isinstance(v, int):
+            return {"type": "integer", "value": str(v)}
+        if isinstance(v, float):
+            return {"type": "float", "value": str(v)}
+        return {"type": "text", "value": str(v)}
+
+    @staticmethod
+    def _cell(c):
+        t = c["type"]
+        if t == "null":
+            return None
+        if t == "integer":
+            return int(c["value"])
+        if t == "float":
+            return float(c["value"])
+        return c["value"]
+
+    def _pipeline(self, stmts):
+        body = [
+            {"type": "execute", "stmt": {"sql": s, "args": [self._arg(a) for a in p]}}
+            for s, p in stmts
+        ]
+        body.append({"type": "close"})
+        resp = _requests.post(self._url, headers=self._headers, json={"requests": body}, timeout=30)
+        resp.raise_for_status()
+        return resp.json()["results"]
+
+    def execute(self, sql: str, params=()):
+        results = self._pipeline([(sql, list(params or []))])
+        res = results[0]
+        if res.get("type") == "error":
+            raise Exception(res["error"]["message"])
+        data = res["response"]["result"]
+        cols = [c["name"] for c in data.get("cols", [])]
+        rows = [[self._cell(c) for c in row] for row in data.get("rows", [])]
+        return _TursoCursor(cols, rows)
+
+    def executemany(self, sql: str, param_list):
+        stmts = [(sql, list(p)) for p in param_list]
+        if stmts:
+            self._pipeline(stmts)
+
+    def commit(self):
+        pass  # Turso auto-commits each statement
+
+    def close(self):
+        pass
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bills (
@@ -45,12 +136,21 @@ CREATE TABLE IF NOT EXISTS compliance_questions (
 """
 
 
-def init_db(db_path: str) -> sqlite3.Connection:
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
-    # migrate existing DBs that don't have new columns
+def init_db(db_path: str, turso_url: str = None, turso_token: str = None):
+    if turso_url and turso_token:
+        conn = _TursoConn(turso_url, turso_token)
+    else:
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+
+    for stmt in [s.strip() for s in SCHEMA.split(";") if s.strip()]:
+        try:
+            conn.execute(stmt)
+        except Exception:
+            pass
+    conn.commit()
+
     for col, default in [("category", "'environmental'"), ("history", "'[]'")]:
         try:
             conn.execute(f"ALTER TABLE bills ADD COLUMN {col} TEXT DEFAULT {default}")

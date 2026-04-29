@@ -72,7 +72,8 @@ def build_search_query(keywords: list) -> str:
     return " OR ".join(f'"{kw}"' for kw in keywords)
 
 
-SKIP_TITLE_PATTERNS = ("budget act", "trailer bill", "maintenance of the codes")
+SKIP_TITLE_PATTERNS = ("trailer bill", "maintenance of the codes")
+BUDGET_TITLE_PATTERNS = ("budget act",)
 
 
 def is_environmental(bill_detail: dict, subject_allowlist: set) -> bool:
@@ -161,6 +162,7 @@ def scrape_environmental_bills(
             title_lc = (detail.get("title") or "").lower()
             if any(p in title_lc for p in SKIP_TITLE_PATTERNS):
                 continue
+            category = "budget" if any(p in title_lc for p in BUDGET_TITLE_PATTERNS) else "environmental"
 
             doc_id = _get_best_text_doc_id(detail)
             text = None
@@ -174,6 +176,14 @@ def scrape_environmental_bills(
                     print(f"  getBillText({doc_id}) failed: {e}", file=sys.stderr)
 
             subjects = [s["subject_name"] for s in detail.get("subjects", [])]
+
+            # extract legislative history events
+            raw_history = detail.get("history", [])
+            history = [
+                {"date": h.get("date", ""), "action": h.get("action", ""), "chamber": h.get("chamber", "")}
+                for h in raw_history
+                if h.get("date") and h.get("action")
+            ]
 
             # parse session year from the session object if available
             bill_session_year = session_year
@@ -192,6 +202,8 @@ def scrape_environmental_bills(
                 subjects=subjects,
                 text=text or detail.get("description", ""),
                 text_doc_id=doc_id,
+                category=category,
+                history=history,
             )
             bills.append(bill)
             print(f"  [{len(bills)}/{limit}] {bill.bill_number}: {bill.title[:60]}", file=sys.stderr)

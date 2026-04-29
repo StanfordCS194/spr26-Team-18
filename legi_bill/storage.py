@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS bills (
     subjects     TEXT,
     text         TEXT,
     text_doc_id  INTEGER,
+    category     TEXT DEFAULT 'environmental',
+    history      TEXT DEFAULT '[]',
     created_at   TEXT DEFAULT (datetime('now'))
 );
 
@@ -29,6 +31,7 @@ CREATE TABLE IF NOT EXISTS summaries (
     cache_hit     INTEGER,
     input_tokens  INTEGER,
     output_tokens INTEGER,
+    metadata      TEXT DEFAULT '{}',
     created_at    TEXT DEFAULT (datetime('now'))
 );
 
@@ -47,7 +50,18 @@ def init_db(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
-    conn.commit()
+    # migrate existing DBs that don't have new columns
+    for col, default in [("category", "'environmental'"), ("history", "'[]'")]:
+        try:
+            conn.execute(f"ALTER TABLE bills ADD COLUMN {col} TEXT DEFAULT {default}")
+            conn.commit()
+        except Exception:
+            pass
+    try:
+        conn.execute("ALTER TABLE summaries ADD COLUMN metadata TEXT DEFAULT '{}'")
+        conn.commit()
+    except Exception:
+        pass
     return conn
 
 
@@ -56,8 +70,8 @@ def upsert_bill(conn: sqlite3.Connection, bill: Bill) -> None:
         """
         INSERT OR REPLACE INTO bills
             (bill_id, bill_number, title, description, state, status,
-             session_year, url, subjects, text, text_doc_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             session_year, url, subjects, text, text_doc_id, category, history)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             bill.bill_id,
@@ -71,6 +85,8 @@ def upsert_bill(conn: sqlite3.Connection, bill: Bill) -> None:
             json.dumps(bill.subjects),
             bill.text,
             bill.text_doc_id,
+            bill.category,
+            json.dumps(bill.history),
         ),
     )
     conn.commit()
@@ -80,8 +96,8 @@ def upsert_summary(conn: sqlite3.Connection, summary: BillSummary) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO summaries
-            (bill_id, summary_text, model_used, cache_hit, input_tokens, output_tokens)
-        VALUES (?, ?, ?, ?, ?, ?)
+            (bill_id, summary_text, model_used, cache_hit, input_tokens, output_tokens, metadata)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (
             summary.bill_id,
@@ -90,6 +106,7 @@ def upsert_summary(conn: sqlite3.Connection, summary: BillSummary) -> None:
             int(summary.cache_hit),
             summary.input_tokens,
             summary.output_tokens,
+            json.dumps(summary.metadata),
         ),
     )
     conn.commit()
@@ -124,6 +141,8 @@ def _row_to_bill(row: sqlite3.Row) -> Bill:
         subjects=json.loads(row["subjects"] or "[]"),
         text=row["text"],
         text_doc_id=row["text_doc_id"],
+        category=row["category"] or "environmental",
+        history=json.loads(row["history"] or "[]"),
     )
 
 
@@ -175,8 +194,13 @@ def get_bill_with_summary_and_questions(
         (bill.bill_id,),
     ).fetchall()
 
+    summary_dict = None
+    if summary_row:
+        summary_dict = dict(summary_row)
+        summary_dict["metadata"] = json.loads(summary_dict.get("metadata") or "{}")
+
     return {
         "bill": bill,
-        "summary": dict(summary_row) if summary_row else None,
+        "summary": summary_dict,
         "questions": [dict(r) for r in question_rows],
     }

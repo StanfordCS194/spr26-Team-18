@@ -16,6 +16,8 @@ class Bill:
     subjects: list
     text: Optional[str] = None
     text_doc_id: Optional[int] = None
+    category: str = "environmental"
+    history: list = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
 
 
@@ -27,6 +29,7 @@ class BillSummary:
     cache_hit: bool
     input_tokens: int
     output_tokens: int
+    metadata: dict = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.utcnow)
 
 

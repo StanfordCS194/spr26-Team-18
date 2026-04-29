@@ -2,6 +2,11 @@
 .env
 *.db
 
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
 # Python
 __pycache__/
 *.pyc

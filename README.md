@@ -83,3 +83,18 @@ python3 -m legi_bill.cli export --output bills.json
 - **Bill Lookup** — Browse and search California environmental bills with plain-language summaries and compliance questions
 - **Legislator Tracker** *(coming soon)* — Voting history and pattern analysis per legislator
 - **Company Match** *(coming soon)* — Upload a 10-K and get a ranked list of bills relevant to your operations
+
+## Ranking calibration harness
+
+Use the local harness to test `rank_bills()` against a few known company archetypes:
+
+```bash
+export LEGI_BILL_DB_PATH=./tests/local_bills.db
+python3 tests/seed_mock_data.py
+python3 tests/rank_harness.py
+python3 tests/rank_harness.py --case beverage
+python3 tests/rank_harness.py --json
+```
+
+The harness reads from `LEGI_BILL_DB_PATH`. For a quick local calibration loop,
+point it at `./tests/local_bills.db` and seed the mock bill corpus first.

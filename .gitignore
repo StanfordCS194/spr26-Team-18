@@ -12,6 +12,9 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Editor settings
+.vscode/
+
 # General macOS files
 .DS_Store
 .AppleDouble

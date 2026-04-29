@@ -5,8 +5,8 @@ const TABS = [
   { id: "home", label: "Home", Icon: Home },
   { id: "bills", label: "Bill Lookup", Icon: FileText },
   { id: "legislators", label: "Legislator Tracker", Icon: Landmark },
-  { id: "company", label: "Company Match", Icon: Building2 },
   { id: "grade", label: "10-K Grader", Icon: Gauge },
+  { id: "company", label: "Policy Chat", Icon: Building2 },
 ];
 
 export default function Sidebar({ activeTab, onTabChange }) {

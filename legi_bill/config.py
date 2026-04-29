@@ -72,14 +72,6 @@ def load_config() -> dict:
     legiscan_key = os.getenv("LEGISCAN_API_KEY")
     openai_key = os.getenv("OPENAI_API_KEY")
 
-    if not legiscan_key:
-        raise EnvironmentError(
-            "LEGISCAN_API_KEY is not set. Copy .env.example to .env and fill it in."
-        )
-    if not openai_key:
-        raise EnvironmentError(
-            "OPENAI_API_KEY is not set. Copy .env.example to .env and fill it in."
-        )
 
     raw_db_path = os.getenv("LEGI_BILL_DB_PATH", "~/.legi_bill/bills.db")
     db_path = str(Path(raw_db_path).expanduser())
@@ -89,4 +81,6 @@ def load_config() -> dict:
         "legiscan_api_key": legiscan_key,
         "openai_api_key": openai_key,
         "db_path": db_path,
+        "turso_url": os.getenv("TURSO_DATABASE_URL"),
+        "turso_token": os.getenv("TURSO_AUTH_TOKEN"),
     }

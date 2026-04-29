@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Loader2, ExternalLink, CheckSquare, Calendar, Building2, AlertTriangle, ShieldOff } from "lucide-react";
+import { Loader2, ExternalLink, CheckSquare, Calendar, Building2, AlertTriangle, ShieldOff, ChevronDown } from "lucide-react";
 
 const SECTION_LABELS = ["What it does", "Who it affects", "Key requirements", "Current status"];
 
@@ -100,38 +100,54 @@ function IndustryTags({ industries }) {
 }
 
 function BillTimeline({ history }) {
+  const [open, setOpen] = useState(false);
   if (!history?.length) return null;
 
   return (
     <div className="mb-5">
-      <p className="mb-3 text-[10.5px] font-bold uppercase tracking-[0.1em] text-text-muted">
-        Legislative History
-      </p>
-      <div className="relative pl-5">
-        {/* vertical line */}
-        <div className="absolute left-[7px] top-2 bottom-2 w-[2px] bg-border-chip" />
-        <div className="flex flex-col gap-3">
-          {history.map((event, i) => {
-            const isLast = i === history.length - 1;
-            return (
-              <div key={i} className="relative flex items-start gap-3">
-                <div
-                  className={
-                    "absolute -left-5 mt-[3px] h-3.5 w-3.5 rounded-full border-2 " +
-                    (isLast
-                      ? "border-action-dark bg-action-dark"
-                      : "border-action bg-card")
-                  }
-                />
-                <div>
-                  <p className="text-[11px] font-semibold text-text-muted">{event.date}</p>
-                  <p className="text-[13px] leading-snug text-text-secondary">{event.action}</p>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        className="flex w-full items-center justify-between"
+      >
+        <p className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-text-muted">
+          Legislative History
+          <span className="ml-2 font-normal normal-case tracking-normal text-text-muted">
+            ({history.length} events)
+          </span>
+        </p>
+        <ChevronDown
+          className={"h-3.5 w-3.5 text-text-muted transition-transform duration-200 " + (open ? "rotate-180" : "")}
+          strokeWidth={2}
+        />
+      </button>
+
+      {open && (
+        <div className="relative mt-3 pl-5">
+          <div className="absolute left-[7px] top-2 bottom-2 w-[2px] bg-border-chip" />
+          <div className="flex flex-col gap-3">
+            {history.map((event, i) => {
+              const isLast = i === history.length - 1;
+              return (
+                <div key={i} className="relative flex items-start gap-3">
+                  <div
+                    className={
+                      "absolute -left-5 mt-[3px] h-3.5 w-3.5 rounded-full border-2 " +
+                      (isLast
+                        ? "border-action-dark bg-action-dark"
+                        : "border-action bg-card")
+                    }
+                  />
+                  <div>
+                    <p className="text-[11px] font-semibold text-text-muted">{event.date}</p>
+                    <p className="text-[13px] leading-snug text-text-secondary">{event.action}</p>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

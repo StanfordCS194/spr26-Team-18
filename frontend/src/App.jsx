@@ -30,7 +30,7 @@ export default function App() {
   return (
     <div className="min-h-screen">
       <Sidebar activeTab={activeTab} onTabChange={changeTab} />
-      <main className="ml-60 px-10 pb-20 pt-10">
+      <main className="ml-64 px-10 pb-20 pt-10">
         <div className="mx-auto max-w-[1080px] animate-fade-in" key={activeTab}>
           {activeTab === "startup" && <StartupGrader />}
           {activeTab === "legal" && (

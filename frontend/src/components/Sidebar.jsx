@@ -3,14 +3,14 @@ import logo from "../assets/logo.png";
 
 const TABS = [
   { id: "startup", label: "Startup Health", Icon: Sparkles },
-  { id: "legal", label: "Legal Intelligence", Icon: Landmark },
-  { id: "recs", label: "Active Recommendations", Icon: MessageCircle },
-  { id: "financial", label: "Financial Compliance", Icon: Gauge },
+  { id: "legal", label: "Legal", Icon: Landmark },
+  { id: "recs", label: "Recommendations", Icon: MessageCircle },
+  { id: "financial", label: "Financial", Icon: Gauge },
 ];
 
 export default function Sidebar({ activeTab, onTabChange }) {
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-60 flex-col border-r border-border bg-sidebar-gradient">
+    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-border bg-sidebar-gradient">
       <div className="flex items-center gap-2.5 px-6 pt-7 pb-6">
         <img src={logo} alt="" className="h-8 w-8 rounded-lg object-contain" />
         <span className="text-[17px] font-bold tracking-tight text-text-primary">

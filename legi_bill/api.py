@@ -1,8 +1,9 @@
 import json as _json
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
@@ -77,7 +78,27 @@ def _extract_text(file: UploadFile) -> str:
     if name.endswith(".pdf"):
         reader = PdfReader(BytesIO(data))
         return "\n".join((p.extract_text() or "") for p in reader.pages)
+    if name.endswith(".csv"):
+        df = pd.read_csv(StringIO(data.decode("utf-8", errors="replace")))
+        return _df_to_text(df)
+    if name.endswith((".xlsx", ".xls")):
+        excel = pd.ExcelFile(BytesIO(data))
+        parts = []
+        for sheet in excel.sheet_names:
+            df = excel.parse(sheet)
+            parts.append(f"Sheet: {sheet}\n{_df_to_text(df)}")
+        return "\n\n".join(parts)
     return data.decode("utf-8", errors="replace")
+
+
+def _df_to_text(df: pd.DataFrame) -> str:
+    df = df.dropna(how="all").dropna(axis=1, how="all")
+    lines = [f"Columns: {', '.join(str(c) for c in df.columns)}"]
+    for _, row in df.iterrows():
+        pairs = [f"{col}: {val}" for col, val in row.items() if pd.notna(val)]
+        if pairs:
+            lines.append(" | ".join(pairs))
+    return "\n".join(lines)
 
 
 @app.post("/api/match")
@@ -394,6 +415,94 @@ def get_featured(ticker: str):
     if not payload:
         raise HTTPException(404, f"Featured ticker {ticker} not in cache.")
     return payload
+
+
+COMPLIANCE_SYSTEM_PROMPT = """You are a financial compliance analyst assisting a company with IRS-related reporting and tax compliance.
+
+Your task is to analyze the provided financial document or company disclosure text and identify potential IRS compliance risk areas. Focus on:
+- corporate tax reporting and filing requirements
+- payroll and employment tax withholding/reporting
+- information reporting (1099, 1098, 1095, W-2)
+- deductions, credits, and tax basis documentation
+- record retention and documentation practices
+- any indicators of unusual or missing disclosure relevant to IRS compliance
+
+Do not provide tax advice. Instead, identify possible compliance concerns in the document and suggest high-level next steps for further review by a qualified tax professional.
+
+Return ONLY valid JSON following this schema:
+{
+  "overall_risk": "Low|Moderate|High|Unknown",
+  "risk_score": <int 0-100>,
+  "summary": "Short summary of the IRS compliance scan.",
+  "issues": [
+    {
+      "area": "Payroll tax | Corporate tax | Reporting | Deductions | Recordkeeping | Other",
+      "finding": "What the document suggests might require attention.",
+      "recommendation": "High-level next step for review or remediation."
+    }
+  ],
+  "notes": ["Any assumptions or limitations of the analysis."]
+}"""
+
+COMPLIANCE_PROMPT_TEMPLATE = """COMPANY NAME: {company_name}
+
+DOCUMENT TEXT:
+{document_text}
+
+Analyze the document and return the JSON payload exactly as described above. If the document has no obvious IRS compliance issues, set overall_risk to "Low" and return an empty issues array. If the text is too short to form a useful opinion, set overall_risk to "Unknown" and include a note explaining the limitation."""
+
+
+@app.post("/api/compliance/audit")
+def compliance_audit(
+    company_name: Optional[str] = Form(None),
+    document_text: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+):
+    text = ""
+    if file is not None and file.filename:
+        try:
+            text = _extract_text(file)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Could not read file: {e}")
+    elif document_text:
+        text = document_text
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Provide a non-empty file or document_text.")
+
+    cfg = load_config()
+    api_key = cfg.get("openai_api_key", "")
+    if not api_key or api_key.startswith("stub"):
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not configured.")
+
+    audit_text = text.strip()
+    if len(audit_text) > 30000:
+        audit_text = audit_text[:30000] + "\n\n[TRUNCATED: document exceeded 30,000 characters]"
+
+    prompt = COMPLIANCE_PROMPT_TEMPLATE.format(
+        company_name=company_name or "(unspecified)",
+        document_text=audit_text,
+    )
+
+    client = OpenAI(api_key=api_key)
+    try:
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": COMPLIANCE_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+            response_format={"type": "json_object"},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"OpenAI API error: {e}")
+
+    content = response.choices[0].message.content or "{}"
+    try:
+        return _json.loads(content)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to parse compliance audit response.")
 
 
 @app.get("/api/bills/{bill_number}")

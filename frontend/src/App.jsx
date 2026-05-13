@@ -4,10 +4,11 @@ import Sidebar from "./components/Sidebar";
 import Home from "./components/Home";
 import BillList from "./components/BillList";
 import CompanyMatch from "./components/CompanyMatch";
+import FinancialCompliance from "./components/FinancialCompliance";
 import GradeReveal from "./components/GradeReveal";
 import PlaceholderTab from "./components/PlaceholderTab";
 
-const TAB_IDS = ["home", "bills", "legislators", "company", "grade"];
+const TAB_IDS = ["home", "bills", "legislators", "company", "grade", "compliance"];
 
 function tabFromHash() {
   const h = (typeof window !== "undefined" ? window.location.hash : "").slice(1);
@@ -57,6 +58,7 @@ export default function App() {
             />
           )}
           {activeTab === "grade" && <GradeReveal onChatAboutBill={chatAboutBill} />}
+          {activeTab === "compliance" && <FinancialCompliance />}
         </div>
       </main>
     </div>

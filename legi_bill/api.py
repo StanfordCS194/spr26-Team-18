@@ -7,6 +7,7 @@ import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
+from pydantic import BaseModel
 from pypdf import PdfReader
 
 from app.ranking import rank_bills
@@ -99,6 +100,27 @@ def _df_to_text(df: pd.DataFrame) -> str:
         if pairs:
             lines.append(" | ".join(pairs))
     return "\n".join(lines)
+@app.post("/api/startup/prd/extract")
+def extract_startup_prd(file: UploadFile = File(...)):
+    """Extract PRD text for the startup health grader.
+
+    Text/Markdown can be parsed in the browser, but PDFs need backend parsing
+    via pypdf. The frontend still runs the deterministic PRD rubric locally
+    after receiving this text.
+    """
+    if not file.filename:
+        raise HTTPException(400, "Upload a PRD file.")
+    try:
+        text = _extract_text(file)
+    except Exception as e:
+        raise HTTPException(400, f"Could not read PRD: {e}")
+    if not text.strip():
+        raise HTTPException(400, "No readable text found in PRD.")
+    return {
+        "filename": file.filename,
+        "text": text,
+        "length": len(text),
+    }
 
 
 @app.post("/api/match")
@@ -417,92 +439,67 @@ def get_featured(ticker: str):
     return payload
 
 
-COMPLIANCE_SYSTEM_PROMPT = """You are a financial compliance analyst assisting a company with IRS-related reporting and tax compliance.
-
-Your task is to analyze the provided financial document or company disclosure text and identify potential IRS compliance risk areas. Focus on:
-- corporate tax reporting and filing requirements
-- payroll and employment tax withholding/reporting
-- information reporting (1099, 1098, 1095, W-2)
-- deductions, credits, and tax basis documentation
-- record retention and documentation practices
-- any indicators of unusual or missing disclosure relevant to IRS compliance
-
-Do not provide tax advice. Instead, identify possible compliance concerns in the document and suggest high-level next steps for further review by a qualified tax professional.
-
-Return ONLY valid JSON following this schema:
-{
-  "overall_risk": "Low|Moderate|High|Unknown",
-  "risk_score": <int 0-100>,
-  "summary": "Short summary of the IRS compliance scan.",
-  "issues": [
-    {
-      "area": "Payroll tax | Corporate tax | Reporting | Deductions | Recordkeeping | Other",
-      "finding": "What the document suggests might require attention.",
-      "recommendation": "High-level next step for review or remediation."
-    }
-  ],
-  "notes": ["Any assumptions or limitations of the analysis."]
-}"""
-
-COMPLIANCE_PROMPT_TEMPLATE = """COMPANY NAME: {company_name}
-
-DOCUMENT TEXT:
-{document_text}
-
-Analyze the document and return the JSON payload exactly as described above. If the document has no obvious IRS compliance issues, set overall_risk to "Low" and return an empty issues array. If the text is too short to form a useful opinion, set overall_risk to "Unknown" and include a note explaining the limitation."""
+class StartupSummaryRequest(BaseModel):
+    name: str
+    grade: str
+    composite: int
+    axes: dict
+    top_actions: list
 
 
-@app.post("/api/compliance/audit")
-def compliance_audit(
-    company_name: Optional[str] = Form(None),
-    document_text: Optional[str] = Form(None),
-    file: Optional[UploadFile] = File(None),
-):
-    text = ""
-    if file is not None and file.filename:
-        try:
-            text = _extract_text(file)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Could not read file: {e}")
-    elif document_text:
-        text = document_text
-
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="Provide a non-empty file or document_text.")
-
+@app.post("/api/startup/summary")
+def startup_summary(req: StartupSummaryRequest):
+    """Synthesize a short verdict over the deterministic startup-health grade."""
     cfg = load_config()
     api_key = cfg.get("openai_api_key", "")
     if not api_key or api_key.startswith("stub"):
-        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not configured.")
+        raise HTTPException(503, "OPENAI_API_KEY not configured.")
 
-    audit_text = text.strip()
-    if len(audit_text) > 30000:
-        audit_text = audit_text[:30000] + "\n\n[TRUNCATED: document exceeded 30,000 characters]"
+    lines = [
+        f"Startup: {req.name}",
+        f"Composite grade: {req.grade} ({req.composite}/100)",
+        "",
+        "Per-axis sub-scores:",
+    ]
+    for axis_key, axis_data in req.axes.items():
+        lines.append(f"  - {axis_key}: {axis_data.get('score', 0)}/100")
 
-    prompt = COMPLIANCE_PROMPT_TEMPLATE.format(
-        company_name=company_name or "(unspecified)",
-        document_text=audit_text,
+    lines.append("")
+    lines.append("Failed rules:")
+    seen = 0
+    for axis_key, axis_data in req.axes.items():
+        for r in axis_data.get("results", []):
+            if r.get("passed") is False:
+                lines.append(f"  - [{axis_key}] {r.get('title')} — {r.get('observed')}")
+                seen += 1
+                if seen >= 12:
+                    break
+        if seen >= 12:
+            break
+
+    system = (
+        "You are a no-nonsense startup advisor. You will be shown a structured grade "
+        "produced by a deterministic rubric. Do not re-grade. Write a 2-3 sentence "
+        "verdict that synthesizes what's strong, the single biggest risk, and one "
+        "concrete next step. Do not invent facts. No bullets or headers."
     )
 
-    client = OpenAI(api_key=api_key)
     try:
-        response = client.chat.completions.create(
-            model=OPENAI_MODEL,
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model=cfg.get("openai_model", OPENAI_MODEL) or "gpt-4o-mini",
             messages=[
-                {"role": "system", "content": COMPLIANCE_SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": system},
+                {"role": "user", "content": "\n".join(lines)},
             ],
-            temperature=0.0,
-            response_format={"type": "json_object"},
+            temperature=0.4,
+            max_tokens=180,
         )
+        verdict = (resp.choices[0].message.content or "").strip()
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"OpenAI API error: {e}")
+        raise HTTPException(502, f"Summary generation failed: {e}")
 
-    content = response.choices[0].message.content or "{}"
-    try:
-        return _json.loads(content)
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to parse compliance audit response.")
+    return {"verdict": verdict, "model": cfg.get("openai_model", OPENAI_MODEL)}
 
 
 @app.get("/api/bills/{bill_number}")

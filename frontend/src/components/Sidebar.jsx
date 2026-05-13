@@ -1,7 +1,17 @@
-import { Home, FileText, Landmark, Building2, Gauge } from "lucide-react";
+import {
+  Home,
+  FileText,
+  Landmark,
+  Building2,
+  Gauge,
+  MessageCircle,
+  Sparkles,
+} from "lucide-react";
 import logo from "../assets/logo.png";
 
 const TABS = [
+  { id: "startup", label: "Startup Health", Icon: Sparkles },
+  { id: "recs", label: "Recommendations", Icon: MessageCircle },
   { id: "home", label: "Home", Icon: Home },
   { id: "bills", label: "Bill Lookup", Icon: FileText },
   { id: "legislators", label: "Legislator Tracker", Icon: Landmark },

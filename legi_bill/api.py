@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
+from pydantic import BaseModel
 from pypdf import PdfReader
 
 from app.ranking import rank_bills
@@ -78,6 +79,29 @@ def _extract_text(file: UploadFile) -> str:
         reader = PdfReader(BytesIO(data))
         return "\n".join((p.extract_text() or "") for p in reader.pages)
     return data.decode("utf-8", errors="replace")
+
+
+@app.post("/api/startup/prd/extract")
+def extract_startup_prd(file: UploadFile = File(...)):
+    """Extract PRD text for the startup health grader.
+
+    Text/Markdown can be parsed in the browser, but PDFs need backend parsing
+    via pypdf. The frontend still runs the deterministic PRD rubric locally
+    after receiving this text.
+    """
+    if not file.filename:
+        raise HTTPException(400, "Upload a PRD file.")
+    try:
+        text = _extract_text(file)
+    except Exception as e:
+        raise HTTPException(400, f"Could not read PRD: {e}")
+    if not text.strip():
+        raise HTTPException(400, "No readable text found in PRD.")
+    return {
+        "filename": file.filename,
+        "text": text,
+        "length": len(text),
+    }
 
 
 @app.post("/api/match")
@@ -394,6 +418,69 @@ def get_featured(ticker: str):
     if not payload:
         raise HTTPException(404, f"Featured ticker {ticker} not in cache.")
     return payload
+
+
+class StartupSummaryRequest(BaseModel):
+    name: str
+    grade: str
+    composite: int
+    axes: dict
+    top_actions: list
+
+
+@app.post("/api/startup/summary")
+def startup_summary(req: StartupSummaryRequest):
+    """Synthesize a short verdict over the deterministic startup-health grade."""
+    cfg = load_config()
+    api_key = cfg.get("openai_api_key", "")
+    if not api_key or api_key.startswith("stub"):
+        raise HTTPException(503, "OPENAI_API_KEY not configured.")
+
+    lines = [
+        f"Startup: {req.name}",
+        f"Composite grade: {req.grade} ({req.composite}/100)",
+        "",
+        "Per-axis sub-scores:",
+    ]
+    for axis_key, axis_data in req.axes.items():
+        lines.append(f"  - {axis_key}: {axis_data.get('score', 0)}/100")
+
+    lines.append("")
+    lines.append("Failed rules:")
+    seen = 0
+    for axis_key, axis_data in req.axes.items():
+        for r in axis_data.get("results", []):
+            if r.get("passed") is False:
+                lines.append(f"  - [{axis_key}] {r.get('title')} — {r.get('observed')}")
+                seen += 1
+                if seen >= 12:
+                    break
+        if seen >= 12:
+            break
+
+    system = (
+        "You are a no-nonsense startup advisor. You will be shown a structured grade "
+        "produced by a deterministic rubric. Do not re-grade. Write a 2-3 sentence "
+        "verdict that synthesizes what's strong, the single biggest risk, and one "
+        "concrete next step. Do not invent facts. No bullets or headers."
+    )
+
+    try:
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model=cfg.get("openai_model", OPENAI_MODEL) or "gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": "\n".join(lines)},
+            ],
+            temperature=0.4,
+            max_tokens=180,
+        )
+        verdict = (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        raise HTTPException(502, f"Summary generation failed: {e}")
+
+    return {"verdict": verdict, "model": cfg.get("openai_model", OPENAI_MODEL)}
 
 
 @app.get("/api/bills/{bill_number}")

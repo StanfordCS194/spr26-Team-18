@@ -6,9 +6,10 @@ import BillList from "./components/BillList";
 import CompanyMatch from "./components/CompanyMatch";
 import FinancialCompliance from "./components/FinancialCompliance";
 import GradeReveal from "./components/GradeReveal";
+import LegalIntelligence from "./components/LegalIntelligence";
 import PlaceholderTab from "./components/PlaceholderTab";
 
-const TAB_IDS = ["home", "bills", "legislators", "company", "grade", "compliance"];
+const TAB_IDS = ["home", "bills", "legislators", "company", "grade", "legal", "compliance"];
 import StartupGrader from "./components/StartupGrader";
 import ActiveRecommendations from "./components/ActiveRecommendations";
 import PlaceholderTab from "./components/PlaceholderTab";
@@ -66,6 +67,7 @@ export default function App() {
             />
           )}
           {activeTab === "grade" && <GradeReveal onChatAboutBill={chatAboutBill} />}
+          {activeTab === "legal" && <LegalIntelligence />}
           {activeTab === "compliance" && <FinancialCompliance />}
         </div>
       </main>

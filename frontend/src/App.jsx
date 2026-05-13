@@ -1,18 +1,9 @@
 import { useEffect, useState } from "react";
-import { Landmark, Gauge } from "lucide-react";
 import Sidebar from "./components/Sidebar";
-import Home from "./components/Home";
-import BillList from "./components/BillList";
-import CompanyMatch from "./components/CompanyMatch";
-import FinancialCompliance from "./components/FinancialCompliance";
-import GradeReveal from "./components/GradeReveal";
-import LegalIntelligence from "./components/LegalIntelligence";
-import PlaceholderTab from "./components/PlaceholderTab";
-
-const TAB_IDS = ["home", "bills", "legislators", "company", "grade", "legal", "compliance"];
 import StartupGrader from "./components/StartupGrader";
 import ActiveRecommendations from "./components/ActiveRecommendations";
-import PlaceholderTab from "./components/PlaceholderTab";
+import LegalIntelligence from "./components/LegalIntelligence";
+import FinancialCompliance from "./components/FinancialCompliance";
 
 const TAB_IDS = ["startup", "legal", "recs", "financial"];
 
@@ -46,29 +37,14 @@ export default function App() {
           {activeTab === "startup" && (
             <StartupGrader onRecommendationsUpdated={setStartupRecommendations} />
           )}
-          {activeTab === "legal" && (
-            <PlaceholderTab
-              Icon={Landmark}
-              title="Legal Intelligence"
-              description="Contract analyzer for SAFEs, term sheets, and customer MSAs. Compares clauses to YC standard, surfaces redlines, and tells you what a real lawyer would charge to find the same issues."
-            />
-          )}
+          {activeTab === "legal" && <LegalIntelligence />}
           {activeTab === "recs" && (
             <ActiveRecommendations
               snapshot={startupRecommendations}
               onGoToStartup={() => changeTab("startup")}
             />
           )}
-          {activeTab === "financial" && (
-            <PlaceholderTab
-              Icon={Gauge}
-              title="Financial Compliance"
-              description="Runway forecasting with calibrated uncertainty bands. Transaction categorization from Mercury, Stripe, and Gusto. R&D tax credit estimation and federal/state filing tracker."
-            />
-          )}
-          {activeTab === "grade" && <GradeReveal onChatAboutBill={chatAboutBill} />}
-          {activeTab === "legal" && <LegalIntelligence />}
-          {activeTab === "compliance" && <FinancialCompliance />}
+          {activeTab === "financial" && <FinancialCompliance />}
         </div>
       </main>
     </div>

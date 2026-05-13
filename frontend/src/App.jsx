@@ -1,23 +1,29 @@
 import { useEffect, useState } from "react";
-import { Landmark } from "lucide-react";
+import { Landmark, Gauge } from "lucide-react";
 import Sidebar from "./components/Sidebar";
 import Home from "./components/Home";
 import BillList from "./components/BillList";
 import CompanyMatch from "./components/CompanyMatch";
+import FinancialCompliance from "./components/FinancialCompliance";
 import GradeReveal from "./components/GradeReveal";
 import LegalIntelligence from "./components/LegalIntelligence";
 import PlaceholderTab from "./components/PlaceholderTab";
 
-const TAB_IDS = ["home", "bills", "legislators", "company", "grade", "legal"];
+const TAB_IDS = ["home", "bills", "legislators", "company", "grade", "legal", "compliance"];
+import StartupGrader from "./components/StartupGrader";
+import ActiveRecommendations from "./components/ActiveRecommendations";
+import PlaceholderTab from "./components/PlaceholderTab";
+
+const TAB_IDS = ["startup", "legal", "recs", "financial"];
 
 function tabFromHash() {
   const h = (typeof window !== "undefined" ? window.location.hash : "").slice(1);
-  return TAB_IDS.includes(h) ? h : "home";
+  return TAB_IDS.includes(h) ? h : "startup";
 }
 
 export default function App() {
   const [activeTab, setActiveTab] = useState(tabFromHash);
-  const [chatPreload, setChatPreload] = useState(null);
+  const [startupRecommendations, setStartupRecommendations] = useState(null);
 
   useEffect(() => {
     const onHash = () => setActiveTab(tabFromHash());
@@ -32,33 +38,37 @@ export default function App() {
     }
   }
 
-  function chatAboutBill(bill) {
-    setChatPreload(bill);
-    changeTab("company");
-  }
-
   return (
     <div className="min-h-screen">
       <Sidebar activeTab={activeTab} onTabChange={changeTab} />
-      <main className="ml-60 px-10 pb-20 pt-10">
+      <main className="ml-64 px-10 pb-20 pt-10">
         <div className="mx-auto max-w-[1080px] animate-fade-in" key={activeTab}>
-          {activeTab === "home" && <Home onTabChange={changeTab} />}
-          {activeTab === "bills" && <BillList />}
-          {activeTab === "legislators" && (
+          {activeTab === "startup" && (
+            <StartupGrader onRecommendationsUpdated={setStartupRecommendations} />
+          )}
+          {activeTab === "legal" && (
             <PlaceholderTab
               Icon={Landmark}
-              title="Legislator Tracker"
-              description="See how individual California legislators have voted on environmental bills over time, with AI-generated voting pattern summaries."
+              title="Legal Intelligence"
+              description="Contract analyzer for SAFEs, term sheets, and customer MSAs. Compares clauses to YC standard, surfaces redlines, and tells you what a real lawyer would charge to find the same issues."
             />
           )}
-          {activeTab === "company" && (
-            <CompanyMatch
-              preloadBill={chatPreload}
-              onPreloadConsumed={() => setChatPreload(null)}
+          {activeTab === "recs" && (
+            <ActiveRecommendations
+              snapshot={startupRecommendations}
+              onGoToStartup={() => changeTab("startup")}
+            />
+          )}
+          {activeTab === "financial" && (
+            <PlaceholderTab
+              Icon={Gauge}
+              title="Financial Compliance"
+              description="Runway forecasting with calibrated uncertainty bands. Transaction categorization from Mercury, Stripe, and Gusto. R&D tax credit estimation and federal/state filing tracker."
             />
           )}
           {activeTab === "grade" && <GradeReveal onChatAboutBill={chatAboutBill} />}
           {activeTab === "legal" && <LegalIntelligence />}
+          {activeTab === "compliance" && <FinancialCompliance />}
         </div>
       </main>
     </div>

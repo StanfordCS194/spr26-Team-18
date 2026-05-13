@@ -1,18 +1,28 @@
 import { Home, FileText, Landmark, Building2, Gauge, Scale } from "lucide-react";
+import { Home, FileText, Landmark, Building2, Gauge, ShieldCheck } from "lucide-react";
 import logo from "../assets/logo.png";
 
 const TABS = [
   { id: "home", label: "Home", Icon: Home },
   { id: "bills", label: "Bill Lookup", Icon: FileText },
   { id: "legislators", label: "Legislator Tracker", Icon: Landmark },
-  { id: "company", label: "Company Match", Icon: Building2 },
   { id: "grade", label: "10-K Grader", Icon: Gauge },
   { id: "legal", label: "Legal Savings", Icon: Scale },
+  { id: "company", label: "Policy Chat", Icon: Building2 },
+  { id: "compliance", label: "IRS Compliance", Icon: ShieldCheck },
+import { Landmark, Gauge, Sparkles, MessageCircle } from "lucide-react";
+import logo from "../assets/logo.png";
+
+const TABS = [
+  { id: "startup", label: "Startup Health", Icon: Sparkles },
+  { id: "legal", label: "Legal", Icon: Landmark },
+  { id: "recs", label: "Recommendations", Icon: MessageCircle },
+  { id: "financial", label: "Financial", Icon: Gauge },
 ];
 
 export default function Sidebar({ activeTab, onTabChange }) {
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-60 flex-col border-r border-border bg-sidebar-gradient">
+    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-border bg-sidebar-gradient">
       <div className="flex items-center gap-2.5 px-6 pt-7 pb-6">
         <img src={logo} alt="" className="h-8 w-8 rounded-lg object-contain" />
         <span className="text-[17px] font-bold tracking-tight text-text-primary">

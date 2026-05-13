@@ -4,7 +4,7 @@ Useful for demoing the Streamlit UI without running the LegiScan scraper or
 burning OpenAI API credits. Safe to re-run: all inserts are upserts.
 
 Usage:
-    python scripts/seed_mock_data.py
+    python tests/seed_mock_data.py
 """
 
 import os
@@ -187,6 +187,85 @@ MOCK_BILLS = [
             "Do you have a plan to make all covered packaging recyclable or compostable by 2032?",
             "Have you modeled the financial impact of PRO fees on your California packaging SKUs?",
             "Is your packaging supply chain tracking the data CalRecycle will require for annual reports?",
+        ],
+    },
+    {
+        "bill": Bill(
+            bill_id=901080,
+            bill_number="AB-1080",
+            title="California Circular Economy and Plastic Pollution Reduction Act",
+            description=(
+                "Requires producers of single-use packaging and food service "
+                "ware sold in California to reduce waste generation, improve "
+                "recyclability, and meet source reduction targets."
+            ),
+            state="CA",
+            status="Vetoed / policy basis adopted through SB-54",
+            session_year=2019,
+            url="https://leginfo.legislature.ca.gov/faces/billNavClient.xhtml?bill_id=201920200AB1080",
+            subjects=[
+                "Environmental Safety and Toxic Materials",
+                "Natural Resources",
+            ],
+        ),
+        "summary": (
+            "This bill was the core legislative proposal behind California's "
+            "push to reduce single-use packaging waste. It would have required "
+            "producers of packaging and plastic food service ware to cut waste "
+            "at the source, improve recyclability or compostability, and meet "
+            "statewide recycling and reuse targets. Although AB 1080 itself "
+            "did not become law in this form, its policy framework heavily "
+            "influenced later enacted producer-responsibility legislation. "
+            "Who it affects: brand owners, manufacturers, importers, and "
+            "retailers selling consumer goods with packaging into California. "
+            "Key obligations would have included packaging redesign, source "
+            "reduction planning, and reporting. Current status: not enacted as "
+            "introduced, but still useful as a packaging-policy signal."
+        ),
+        "questions": [
+            "Does your company sell packaged goods or food service items into California?",
+            "Can you measure packaging volume and material mix across California SKUs?",
+            "Have you evaluated packaging redesign opportunities to reduce single-use material?",
+            "Do you have supplier data on recyclability, compostability, or reuse potential?",
+            "Would your current packaging portfolio withstand California source-reduction mandates?",
+        ],
+    },
+    {
+        "bill": Bill(
+            bill_id=901305,
+            bill_number="AB-1305",
+            title="Voluntary carbon market disclosures",
+            description=(
+                "Requires entities that market, purchase, sell, or use "
+                "voluntary carbon offsets and entities making net zero or "
+                "carbon neutral claims in California to post specified "
+                "disclosures on their websites."
+            ),
+            state="CA",
+            status="Chaptered",
+            session_year=2023,
+            url="https://leginfo.legislature.ca.gov/faces/billNavClient.xhtml?bill_id=202320240AB1305",
+            subjects=["Climate Change", "Air Pollution", "Public Health"],
+        ),
+        "summary": (
+            "This bill requires companies connected to voluntary carbon "
+            "offsets and climate marketing claims to publish detailed public "
+            "disclosures. Entities that sell offsets must disclose project "
+            "details, accounting methods, durability, and verification data. "
+            "Entities that buy or use offsets in connection with net-zero, "
+            "carbon neutral, or similar claims must disclose the projects, "
+            "registries, and quantities behind those claims. Who it affects: "
+            "public and private companies doing business in California that "
+            "make climate claims or participate in voluntary carbon markets. "
+            "Key deadlines: annual web disclosures beginning in 2024. Current "
+            "status: signed into law and in effect."
+        ),
+        "questions": [
+            "Does your company make net-zero, carbon neutral, or similar climate claims visible in California?",
+            "Do you purchase or use voluntary carbon offsets to support those claims?",
+            "Can you identify the projects, registries, and quantities tied to each offset-backed claim?",
+            "Are your climate marketing statements supported by public methodology disclosures?",
+            "Has legal or sustainability staff reviewed your website for AB-1305 disclosure gaps?",
         ],
     },
     {

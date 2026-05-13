@@ -1,23 +1,11 @@
-import { Home, FileText, Landmark, Building2, Gauge, Scale } from "lucide-react";
-import { Home, FileText, Landmark, Building2, Gauge, ShieldCheck } from "lucide-react";
-import logo from "../assets/logo.png";
-
-const TABS = [
-  { id: "home", label: "Home", Icon: Home },
-  { id: "bills", label: "Bill Lookup", Icon: FileText },
-  { id: "legislators", label: "Legislator Tracker", Icon: Landmark },
-  { id: "grade", label: "10-K Grader", Icon: Gauge },
-  { id: "legal", label: "Legal Savings", Icon: Scale },
-  { id: "company", label: "Policy Chat", Icon: Building2 },
-  { id: "compliance", label: "IRS Compliance", Icon: ShieldCheck },
-import { Landmark, Gauge, Sparkles, MessageCircle } from "lucide-react";
+import { Scale, Sparkles, MessageCircle, Gauge } from "lucide-react";
 import logo from "../assets/logo.png";
 
 const TABS = [
   { id: "startup", label: "Startup Health", Icon: Sparkles },
-  { id: "legal", label: "Legal", Icon: Landmark },
-  { id: "recs", label: "Recommendations", Icon: MessageCircle },
-  { id: "financial", label: "Financial", Icon: Gauge },
+  { id: "legal",   label: "Legal",          Icon: Scale },
+  { id: "recs",    label: "Recommendations", Icon: MessageCircle },
+  { id: "financial", label: "Financial",    Icon: Gauge },
 ];
 
 export default function Sidebar({ activeTab, onTabChange }) {

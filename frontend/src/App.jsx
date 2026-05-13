@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Landmark, MessageCircle, Gauge } from "lucide-react";
+import { Landmark, Gauge } from "lucide-react";
 import Sidebar from "./components/Sidebar";
 import StartupGrader from "./components/StartupGrader";
+import ActiveRecommendations from "./components/ActiveRecommendations";
 import PlaceholderTab from "./components/PlaceholderTab";
 
 const TAB_IDS = ["startup", "legal", "recs", "financial"];
@@ -13,6 +14,7 @@ function tabFromHash() {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState(tabFromHash);
+  const [startupRecommendations, setStartupRecommendations] = useState(null);
 
   useEffect(() => {
     const onHash = () => setActiveTab(tabFromHash());
@@ -32,7 +34,9 @@ export default function App() {
       <Sidebar activeTab={activeTab} onTabChange={changeTab} />
       <main className="ml-64 px-10 pb-20 pt-10">
         <div className="mx-auto max-w-[1080px] animate-fade-in" key={activeTab}>
-          {activeTab === "startup" && <StartupGrader />}
+          {activeTab === "startup" && (
+            <StartupGrader onRecommendationsUpdated={setStartupRecommendations} />
+          )}
           {activeTab === "legal" && (
             <PlaceholderTab
               Icon={Landmark}
@@ -41,10 +45,9 @@ export default function App() {
             />
           )}
           {activeTab === "recs" && (
-            <PlaceholderTab
-              Icon={MessageCircle}
-              title="Active Recommendations"
-              description="The five highest-leverage actions to take this week, ranked across legal, financial, and compliance. Updates as your grade and runway move."
+            <ActiveRecommendations
+              snapshot={startupRecommendations}
+              onGoToStartup={() => changeTab("startup")}
             />
           )}
           {activeTab === "financial" && (

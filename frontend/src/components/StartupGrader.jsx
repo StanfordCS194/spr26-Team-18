@@ -45,6 +45,7 @@ const INPUT_AXIS_MAP = {
 };
 
 const LAST_GRADE_KEY = "startupGrader.lastGrade.v1";
+export const STARTUP_RECOMMENDATIONS_KEY = "startupGrader.latestRecommendations.v1";
 
 function loadLastGrade() {
   try {
@@ -61,6 +62,17 @@ function loadLastGrade() {
 function saveLastGrade(snapshot) {
   try {
     localStorage.setItem(LAST_GRADE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // ignore quota / private mode failures — feature is best-effort
+  }
+}
+
+function saveRecommendationsSnapshot(snapshot) {
+  try {
+    localStorage.setItem(STARTUP_RECOMMENDATIONS_KEY, JSON.stringify(snapshot));
+    window.dispatchEvent(
+      new CustomEvent("startup-recommendations-updated", { detail: snapshot })
+    );
   } catch {
     // ignore quota / private mode failures — feature is best-effort
   }
@@ -87,7 +99,7 @@ function rulesUnlockedBy(input) {
   return axes.reduce((s, a) => s + RULE_COUNT_BY_AXIS[a], 0);
 }
 
-export default function StartupGrader() {
+export default function StartupGrader({ onRecommendationsUpdated }) {
   // Inputs
   const [githubUrl, setGithubUrl] = useState("");
   const [prdFile, setPrdFile] = useState(null);
@@ -136,6 +148,7 @@ export default function StartupGrader() {
             results: ax.results.map((r) => ({
               title: r.title,
               passed: r.passed,
+              status: r.status,
               observed: r.observed,
               fix: r.fix,
               weight: r.weight,
@@ -196,7 +209,14 @@ export default function StartupGrader() {
         if (githubUrl.trim()) {
           pushLog(`Calling api.github.com · ${githubUrl.trim()}`);
           features.github = await extractGithub(githubUrl);
-          pushLog(`✓ ${features.github.fullName} · ${features.github.filenames.length} files`);
+          pushLog(
+            `✓ ${features.github.fullName} · ${features.github.filenames.length} top-level files · ${features.github.scannedFileCount || 0} code files scanned`
+          );
+          if (features.github.complianceFindings?.length) {
+            pushLog(
+              `✓ Repo compliance scan · ${features.github.highComplianceFindingCount || 0} high · ${features.github.mediumComplianceFindingCount || 0} medium findings`
+            );
+          }
         }
         if (prdFile) {
           pushLog(`Reading PRD · ${prdFile.name}`);
@@ -213,7 +233,7 @@ export default function StartupGrader() {
         }
       }
 
-      pushLog("Running rubric · 35 rules across 5 axes");
+      pushLog(`Running rubric · ${RULES.length} rules across 5 axes`);
       await wait(380);
       const scored = scoreFeatures(features);
       const name = presetName || nameFromInputs(features);
@@ -232,7 +252,7 @@ export default function StartupGrader() {
   }
 
   function animateInto(scored, name) {
-    const target = AXES.reduce((o, a) => ({ ...o, [a]: scored.axes[a].score }), {});
+    const target = AXES.reduce((o, a) => ({ ...o, [a]: scored.axes[a].score ?? 0 }), {});
     setAnimatedScores(ZERO_SCORES);
     setRevealedGrade(null);
     const start = performance.now();
@@ -253,10 +273,28 @@ export default function StartupGrader() {
           composite: scored.composite,
           grade: scored.grade,
           axes: AXES.reduce((o, a) => ({ ...o, [a]: scored.axes[a].score }), {}),
+          evaluatedAxes: scored.evaluatedAxes,
           timestamp: Date.now(),
         };
+        const recommendationsSnap = {
+          ...snap,
+          axisResults: AXES.reduce((o, a) => {
+            o[a] = {
+              score: scored.axes[a].score,
+              failed: scored.axes[a].results.filter((r) => r.status === "failed"),
+              skipped: scored.axes[a].results.filter((r) => r.status === "skipped").length,
+              passed: scored.axes[a].results.filter((r) => r.status === "passed").length,
+              total: scored.axes[a].results.length,
+              evaluated: scored.axes[a].evaluatedCount,
+            };
+            return o;
+          }, {}),
+          topActions: scored.topActions,
+        };
         saveLastGrade(snap);
+        saveRecommendationsSnapshot(recommendationsSnap);
         setLastGrade(snap);
+        onRecommendationsUpdated?.(recommendationsSnap);
         // Fire-and-forget LLM verdict — non-blocking, panel renders its own state.
         fetchVerdict(scored, name);
       }
@@ -275,6 +313,7 @@ export default function StartupGrader() {
     if (demo === "clear") {
       try {
         localStorage.removeItem(LAST_GRADE_KEY);
+        localStorage.removeItem(STARTUP_RECOMMENDATIONS_KEY);
       } catch {}
       setLastGrade(null);
       return;
@@ -336,7 +375,7 @@ export default function StartupGrader() {
           Drop in your <span className="font-medium text-text-primary">GitHub repo</span>, a{" "}
           <span className="font-medium text-text-primary">PRD</span>, and a{" "}
           <span className="font-medium text-text-primary">finance spreadsheet</span>. We score 5
-          axes against 35 rules and tell you the 5 highest-leverage things to fix this week.
+          axes against {RULES.length} rules and tell you the 5 highest-leverage things to fix this week.
         </p>
         {methodologyOpen && <Methodology />}
       </header>
@@ -389,7 +428,7 @@ function Footer() {
   return (
     <footer className="pt-6 text-[11px] leading-relaxed text-text-muted">
       v0.1 prototype · {RULES.length} deterministic rules · GitHub extraction is a live API call ·
-      PRD + CSV parsed in your browser · LLM verdict synthesized server-side from the
+      PRD + CSV parsed deterministically · LLM verdict synthesized server-side from the
       structured grade (not the raw inputs).
     </footer>
   );
@@ -454,14 +493,14 @@ function InputPanel({
         <InputCard
           Icon={FileText}
           title="PRD"
-          subtitle=".md or .txt — parsed in your browser"
+          subtitle=".pdf, .md, or .txt"
           unlocks={`unlocks ${rulesUnlockedBy("prd")} rules in Legal + Compliance + Product`}
           filled={!!prdFile}
         >
           <FileButton
             inputRef={prdRef}
             file={prdFile}
-            accept=".md,.txt,.markdown"
+            accept=".pdf,.md,.txt,.markdown,application/pdf,text/plain,text/markdown"
             onChange={(f) => setPrdFile(f)}
             placeholder="Drop PRD"
           />
@@ -570,7 +609,7 @@ function LastGradeBanner({ snapshot, onDismiss }) {
             Last graded · {snapshot.name || "your startup"}
           </div>
           <div className="text-[11px] text-text-muted">
-            {snapshot.composite}/100 · {timeAgo(snapshot.timestamp)} · saved locally
+            {snapshot.composite}/100 · {(snapshot.evaluatedAxes || []).length || AXES.length}/{AXES.length} axes evaluated · {timeAgo(snapshot.timestamp)} · saved locally
           </div>
         </div>
       </div>
@@ -896,7 +935,10 @@ function RevealStage({
           <div className="mb-4 mt-1">
             <div className="text-[11px] uppercase tracking-[0.18em] text-text-muted">5 axes</div>
             <div className="text-[16px] font-semibold tracking-tight">
-              Composite {result.composite}/100
+              Available-input grade {result.composite}/100
+            </div>
+            <div className="mt-1 text-[11px] text-text-muted">
+              {result.evaluatedAxes.length}/{AXES.length} axes evaluated · missing-input checks skipped
             </div>
           </div>
 
@@ -936,7 +978,7 @@ function RevealStage({
           <ul className="space-y-3">
             {result.topActions.length === 0 && (
               <li className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-[13px] text-emerald-800">
-                ✓ All 35 rules pass. You are unusually well-run.
+                ✓ No failed checks in the evaluated inputs.
               </li>
             )}
             {result.topActions.map((a, i) => (
@@ -1036,6 +1078,7 @@ function GradeStamp({ grade, composite }) {
 }
 
 function riskTone(score) {
+  if (score == null) return { num: "text-text-muted", bar: "bg-border" };
   if (score < 40) return { num: "text-red-600", bar: "bg-red-500" };
   if (score < 65) return { num: "text-orange-500", bar: "bg-orange-400" };
   if (score < 85) return { num: "text-action-dark", bar: "bg-action-dark" };
@@ -1043,8 +1086,9 @@ function riskTone(score) {
 }
 
 function AxisBar({ axis, score, clickable, active, onClick }) {
-  const pct = Math.max(0, Math.min(100, score));
-  const tone = riskTone(pct);
+  const isSkipped = score == null;
+  const pct = isSkipped ? 0 : Math.max(0, Math.min(100, score));
+  const tone = riskTone(score);
   const Wrapper = clickable ? "button" : "div";
   return (
     <Wrapper
@@ -1065,7 +1109,9 @@ function AxisBar({ axis, score, clickable, active, onClick }) {
           style={{ width: `${pct}%`, transition: "width 0.06s linear" }}
         />
       </div>
-      <div className={"w-10 text-right font-mono text-[14px] tabular-nums " + tone.num}>{pct}</div>
+      <div className={"w-10 text-right font-mono text-[14px] tabular-nums " + tone.num}>
+        {isSkipped ? "N/A" : pct}
+      </div>
     </Wrapper>
   );
 }
@@ -1084,6 +1130,21 @@ function ActionRow({ action, index, visible }) {
         <div className="flex-1">
           <div className="text-[13px] font-semibold text-text-primary">{action.title}</div>
           <div className="mt-1 text-[12px] leading-relaxed text-text-secondary">{action.fix}</div>
+          {action.locations?.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {action.locations.slice(0, 2).map((loc) => (
+                <div
+                  key={`${loc.path}:${loc.line}:${loc.title}`}
+                  className="rounded-lg border border-border-muted bg-card px-2 py-1.5 font-mono text-[10px] leading-relaxed text-text-secondary"
+                >
+                  <div className="font-semibold text-text-primary">
+                    {loc.path}:{loc.line}
+                  </div>
+                  <div className="truncate">{loc.snippet}</div>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="mt-1.5 flex items-center gap-2 text-[11px]">
             <span className="rounded-full bg-card px-2 py-0.5 text-text-secondary">
               {AXIS_LABELS[action.axis]}
@@ -1123,24 +1184,53 @@ function AxisDrilldown({ axis, axisData, onClose }) {
             key={r.id}
             className={
               "flex items-start gap-3 rounded-xl border px-3 py-2.5 text-[13px] " +
-              (r.passed
+              (r.status === "passed"
                 ? "border-emerald-100 bg-emerald-50/40"
-                : "border-red-100 bg-red-50/40")
+                : r.status === "skipped"
+                  ? "border-border-muted bg-chip-alt"
+                  : "border-red-100 bg-red-50/40")
             }
           >
             <span
               className={
                 "mt-0.5 inline-flex h-4 w-4 flex-none items-center justify-center rounded-full text-[10px] font-bold " +
-                (r.passed ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")
+                (r.status === "passed"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : r.status === "skipped"
+                    ? "bg-card text-text-muted"
+                    : "bg-red-100 text-red-700")
               }
             >
-              {r.passed ? "✓" : "✕"}
+              {r.status === "passed" ? "✓" : r.status === "skipped" ? "–" : "✕"}
             </span>
             <div className="flex-1">
               <div className="font-medium text-text-primary">{r.title}</div>
               <div className="mt-0.5 text-[12px] text-text-secondary">{r.observed}</div>
-              {!r.passed && (
+              {r.status === "failed" && (
                 <div className="mt-1 text-[12px] italic text-text-muted">→ {r.fix}</div>
+              )}
+              {r.status === "failed" && r.locations?.length > 0 && (
+                <div className="mt-2 space-y-2">
+                  {r.locations.map((loc) => (
+                    <div
+                      key={`${r.id}:${loc.path}:${loc.line}:${loc.title}`}
+                      className="rounded-lg border border-border-muted bg-card px-2.5 py-2 font-mono text-[11px] leading-relaxed text-text-secondary"
+                    >
+                      <div className="mb-1 flex flex-wrap items-center gap-2 font-sans text-[11px]">
+                        <span className="font-semibold text-text-primary">
+                          {loc.path}:{loc.line}
+                        </span>
+                        <span className="rounded-full bg-chip-alt px-2 py-0.5 uppercase tracking-wide text-text-muted">
+                          {loc.severity}
+                        </span>
+                      </div>
+                      <div className="break-words">{loc.snippet}</div>
+                      <div className="mt-1 font-sans text-[12px] text-text-muted">
+                        Change: {loc.recommendation}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
             <div className="font-mono text-[11px] text-text-muted">{r.weight}pt</div>
@@ -1166,13 +1256,14 @@ function Methodology() {
       <div className="space-y-2 text-[13px] leading-relaxed text-text-secondary">
         <p>
           <span className="font-semibold text-text-primary">Inputs.</span> GitHub repo (live API),
-          PRD (.md/.txt), and a finance CSV. Any combination works — missing inputs fail their
-          related rules.
+          PRD (.pdf/.md/.txt), and a finance CSV. Any combination works — missing inputs are
+          skipped instead of counted against the grade.
         </p>
         <p>
           <span className="font-semibold text-text-primary">Rules.</span> {RULES.length}{" "}
           deterministic checks across 5 axes. No LLM in the scoring loop. Sub-grade = 100 −
-          (failed-weight / total-weight) × 100. Composite = equal-weight average of the 5 axes.
+          (failed-weight / evaluated-weight) × 100. Composite = equal-weight average of axes
+          with at least one evaluated rule.
         </p>
       </div>
 

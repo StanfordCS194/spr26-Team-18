@@ -1,8 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Scale, ChevronDown, ChevronUp, CheckCircle2,
-  Clock, DollarSign, ShieldAlert, ShieldCheck, Minus,
+  Clock, DollarSign, ShieldAlert, ShieldCheck, Sparkles, X,
 } from "lucide-react";
+
+const COMPANY_CONTEXT_KEY = "startupGrader.companyContext.v1";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -159,6 +161,7 @@ function ComparisonTable({ result }) {
 
 export default function LegalIntelligence() {
   const [companyText, setCompanyText] = useState("");
+  const [prefilled, setPrefilled] = useState(null);
   const [state, setState] = useState("");
   const [rateOverride, setRateOverride] = useState("");
   const [result, setResult] = useState(null);
@@ -166,6 +169,24 @@ export default function LegalIntelligence() {
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState({});
   const resultsRef = useRef(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(COMPANY_CONTEXT_KEY);
+      if (!raw) return;
+      const ctx = JSON.parse(raw);
+      if (ctx?.description) {
+        setCompanyText(ctx.description);
+        setPrefilled(ctx);
+      }
+    } catch {}
+  }, []);
+
+  function clearPrefill() {
+    setPrefilled(null);
+    setCompanyText("");
+    try { localStorage.removeItem(COMPANY_CONTEXT_KEY); } catch {}
+  }
 
   async function calculate() {
     if (!companyText.trim()) return;
@@ -218,9 +239,24 @@ export default function LegalIntelligence() {
         className="animate-slide-up rounded-3xl border border-border bg-card p-6 shadow-card"
         style={{ animationDelay: "0.08s" }}
       >
-        <label className="mb-2 block text-[13px] font-semibold text-text-primary">
-          Describe your company
-        </label>
+        <div className="mb-2 flex items-center justify-between">
+          <label className="text-[13px] font-semibold text-text-primary">
+            Describe your company
+          </label>
+          {prefilled && (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 rounded-full bg-status-chaptered-bg px-2.5 py-0.5">
+                <Sparkles className="h-3 w-3 text-status-chaptered-text" strokeWidth={2.4} />
+                <span className="text-[11px] font-semibold text-status-chaptered-text">
+                  Pre-filled from Startup Health · {prefilled.name}
+                </span>
+              </div>
+              <button onClick={clearPrefill} className="text-text-muted hover:text-text-primary transition-colors">
+                <X className="h-3.5 w-3.5" strokeWidth={2.4} />
+              </button>
+            </div>
+          )}
+        </div>
         <textarea
           rows={3}
           placeholder="e.g. We're a 60-person fintech startup in Austin building B2B payment infrastructure for mid-market businesses…"

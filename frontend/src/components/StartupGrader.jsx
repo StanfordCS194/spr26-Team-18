@@ -7,6 +7,8 @@ import {
   FileText,
   ChevronDown,
   HelpCircle,
+  Scale,
+  ArrowRight,
 } from "lucide-react";
 import {
   AXES,
@@ -46,6 +48,7 @@ const INPUT_AXIS_MAP = {
 
 const LAST_GRADE_KEY = "startupGrader.lastGrade.v1";
 export const STARTUP_RECOMMENDATIONS_KEY = "startupGrader.latestRecommendations.v1";
+export const COMPANY_CONTEXT_KEY = "startupGrader.companyContext.v1";
 
 function loadLastGrade() {
   try {
@@ -76,6 +79,21 @@ function saveRecommendationsSnapshot(snapshot) {
   } catch {
     // ignore quota / private mode failures — feature is best-effort
   }
+}
+
+function saveCompanyContext(name, features) {
+  try {
+    const parts = [name];
+    if (features?.github?.description) parts.push(features.github.description);
+    if (features?.github?.language) parts.push(`Primary language: ${features.github.language}`);
+    if (features?.prd?.filename) {
+      parts.push(`Product: ${features.prd.filename.replace(/\.(md|txt|pdf)$/i, "")}`);
+    }
+    localStorage.setItem(
+      COMPANY_CONTEXT_KEY,
+      JSON.stringify({ name, description: parts.join(". "), timestamp: Date.now() })
+    );
+  } catch {}
 }
 
 function timeAgo(ts) {
@@ -237,6 +255,7 @@ export default function StartupGrader({ onRecommendationsUpdated }) {
       await wait(380);
       const scored = scoreFeatures(features);
       const name = presetName || nameFromInputs(features);
+      saveCompanyContext(name, features);
       setResult({ features, ...scored, name });
       pushLog(`✓ Composite ${scored.composite}/100 · grade ${scored.grade}`);
       await wait(400);
@@ -421,6 +440,37 @@ export default function StartupGrader({ onRecommendationsUpdated }) {
 
       <Footer />
     </section>
+  );
+}
+
+function LegalSavingsTeaser({ name }) {
+  return (
+    <div className="animate-slide-up overflow-hidden rounded-3xl border border-accent-gold/30 bg-accent-gold/10 px-6 py-5 shadow-card">
+      <div className="flex items-center justify-between gap-6">
+        <div className="flex items-start gap-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-gold/20">
+            <Scale className="h-5 w-5 text-accent-gold" strokeWidth={2} />
+          </div>
+          <div>
+            <div className="text-[13px] font-semibold text-text-primary">
+              See your legal cost savings
+            </div>
+            <div className="mt-0.5 text-[12px] leading-relaxed text-text-secondary">
+              Your startup profile for <span className="font-medium text-text-primary">{name}</span> has
+              been saved. Jump to Legal to see what a compliance attorney would charge — and what
+              Legi-Bill covers automatically.
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={() => { window.location.hash = "#legal"; }}
+          className="flex shrink-0 items-center gap-1.5 rounded-xl bg-action-dark px-4 py-2 text-[13px] font-semibold text-text-invert transition-opacity hover:opacity-90"
+        >
+          See savings
+          <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.4} />
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -987,6 +1037,8 @@ function RevealStage({
           </ul>
         </div>
       </div>
+
+      {showGrade && <LegalSavingsTeaser name={result.name} />}
 
       {showGrade && drilldownAxis && (
         <AxisDrilldown

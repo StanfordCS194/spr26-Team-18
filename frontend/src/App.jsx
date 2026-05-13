@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import { Landmark, Gauge } from "lucide-react";
 import Sidebar from "./components/Sidebar";
+import Home from "./components/Home";
+import BillList from "./components/BillList";
+import CompanyMatch from "./components/CompanyMatch";
+import FinancialCompliance from "./components/FinancialCompliance";
+import GradeReveal from "./components/GradeReveal";
+import PlaceholderTab from "./components/PlaceholderTab";
+
+const TAB_IDS = ["home", "bills", "legislators", "company", "grade", "compliance"];
 import StartupGrader from "./components/StartupGrader";
 import ActiveRecommendations from "./components/ActiveRecommendations";
 import PlaceholderTab from "./components/PlaceholderTab";
@@ -57,6 +65,8 @@ export default function App() {
               description="Runway forecasting with calibrated uncertainty bands. Transaction categorization from Mercury, Stripe, and Gusto. R&D tax credit estimation and federal/state filing tracker."
             />
           )}
+          {activeTab === "grade" && <GradeReveal onChatAboutBill={chatAboutBill} />}
+          {activeTab === "compliance" && <FinancialCompliance />}
         </div>
       </main>
     </div>

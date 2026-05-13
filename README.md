@@ -82,8 +82,7 @@ python3 -m legi_bill.cli export --output bills.json
 
 - **Bill Lookup** — Browse and search California environmental bills with plain-language summaries and compliance questions
 - **Legislator Tracker** *(coming soon)* — Voting history and pattern analysis per legislator
-- **Company Match** *(coming soon)* — Upload a 10-K and get a ranked list of bills relevant to your operations
-
+- **Company Match** *(coming soon)* — Upload a 10-K and get a ranked list of bills relevant to your operations- **Financial Compliance Audit** — Upload financial documents or paste disclosures to receive a preliminary IRS compliance risk assessment
 ## Ranking calibration harness
 
 Use the local harness to test `rank_bills()` against a few known company archetypes:

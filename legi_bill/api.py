@@ -1,8 +1,9 @@
 import json as _json
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
@@ -78,9 +79,27 @@ def _extract_text(file: UploadFile) -> str:
     if name.endswith(".pdf"):
         reader = PdfReader(BytesIO(data))
         return "\n".join((p.extract_text() or "") for p in reader.pages)
+    if name.endswith(".csv"):
+        df = pd.read_csv(StringIO(data.decode("utf-8", errors="replace")))
+        return _df_to_text(df)
+    if name.endswith((".xlsx", ".xls")):
+        excel = pd.ExcelFile(BytesIO(data))
+        parts = []
+        for sheet in excel.sheet_names:
+            df = excel.parse(sheet)
+            parts.append(f"Sheet: {sheet}\n{_df_to_text(df)}")
+        return "\n\n".join(parts)
     return data.decode("utf-8", errors="replace")
 
 
+def _df_to_text(df: pd.DataFrame) -> str:
+    df = df.dropna(how="all").dropna(axis=1, how="all")
+    lines = [f"Columns: {', '.join(str(c) for c in df.columns)}"]
+    for _, row in df.iterrows():
+        pairs = [f"{col}: {val}" for col, val in row.items() if pd.notna(val)]
+        if pairs:
+            lines.append(" | ".join(pairs))
+    return "\n".join(lines)
 @app.post("/api/startup/prd/extract")
 def extract_startup_prd(file: UploadFile = File(...)):
     """Extract PRD text for the startup health grader.

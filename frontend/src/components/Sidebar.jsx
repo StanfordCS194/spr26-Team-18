@@ -1,3 +1,13 @@
+import { Home, FileText, Landmark, Building2, Gauge, ShieldCheck } from "lucide-react";
+import logo from "../assets/logo.png";
+
+const TABS = [
+  { id: "home", label: "Home", Icon: Home },
+  { id: "bills", label: "Bill Lookup", Icon: FileText },
+  { id: "legislators", label: "Legislator Tracker", Icon: Landmark },
+  { id: "grade", label: "10-K Grader", Icon: Gauge },
+  { id: "company", label: "Policy Chat", Icon: Building2 },
+  { id: "compliance", label: "IRS Compliance", Icon: ShieldCheck },
 import { Landmark, Gauge, Sparkles, MessageCircle } from "lucide-react";
 import logo from "../assets/logo.png";
 

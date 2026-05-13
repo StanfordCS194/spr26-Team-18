@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
+from pydantic import BaseModel
 from pypdf import PdfReader
 
 from app.ranking import rank_bills
@@ -394,6 +395,82 @@ def get_featured(ticker: str):
     if not payload:
         raise HTTPException(404, f"Featured ticker {ticker} not in cache.")
     return payload
+
+
+class StartupSummaryRequest(BaseModel):
+    name: str
+    grade: str
+    composite: int
+    axes: dict  # { axis_key: {score, results: [{title, passed, observed, fix, weight}]} }
+    top_actions: list  # [{title, fix, axis, weight, dollarImpact}]
+
+
+@app.post("/api/startup/summary")
+def startup_summary(req: StartupSummaryRequest):
+    """LLM-synthesized 2-3 sentence verdict over a deterministic startup grade.
+
+    The grade itself is computed client-side by the rubric. This endpoint takes
+    the structured result and produces a narrative verdict — no scoring, no
+    rule evaluation. Pure synthesis. If OPENAI_API_KEY is missing, returns a
+    503 so the frontend can render its deterministic fallback.
+    """
+    cfg = load_config()
+    api_key = cfg.get("openai_api_key", "")
+    if not api_key or api_key.startswith("stub"):
+        raise HTTPException(503, "OPENAI_API_KEY not configured.")
+
+    # Compress the structured payload into a compact prompt. We pass the failed
+    # rules per axis (passed rules don't help the verdict) plus the headline
+    # numbers. The LLM sees plain text, not JSON, to discourage echoing.
+    lines = [
+        f"Startup: {req.name}",
+        f"Composite grade: {req.grade} ({req.composite}/100)",
+        "",
+        "Per-axis sub-scores:",
+    ]
+    for axis_key, axis_data in req.axes.items():
+        lines.append(f"  - {axis_key}: {axis_data.get('score', 0)}/100")
+
+    lines.append("")
+    lines.append("Failed rules (the things hurting the grade):")
+    seen = 0
+    for axis_key, axis_data in req.axes.items():
+        for r in axis_data.get("results", []):
+            if not r.get("passed"):
+                lines.append(f"  - [{axis_key}] {r.get('title')} — {r.get('observed')}")
+                seen += 1
+                if seen >= 12:
+                    break
+        if seen >= 12:
+            break
+
+    facts = "\n".join(lines)
+
+    system = (
+        "You are a no-nonsense startup advisor. You will be shown a STRUCTURED grade "
+        "produced by a deterministic rubric (not by you — do not re-grade). Your job is to "
+        "write a 2-3 sentence VERDICT in plain English that synthesizes what's strong, what's "
+        "the single biggest risk, and one concrete next step. Be direct, specific, and "
+        "founder-friendly. Do not invent facts not present in the input. No bullet points. "
+        "No headers. Plain prose only."
+    )
+
+    try:
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model=cfg.get("openai_model", OPENAI_MODEL) or "gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": facts},
+            ],
+            temperature=0.4,
+            max_tokens=180,
+        )
+        verdict = (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        raise HTTPException(502, f"Summary generation failed: {e}")
+
+    return {"verdict": verdict, "model": cfg.get("openai_model", OPENAI_MODEL)}
 
 
 @app.get("/api/bills/{bill_number}")

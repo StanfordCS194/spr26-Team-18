@@ -1,4 +1,4 @@
-import { Home, FileText, Landmark, Building2, Gauge } from "lucide-react";
+import { Home, FileText, Landmark, Building2, Gauge, Scale } from "lucide-react";
 import logo from "../assets/logo.png";
 
 const TABS = [
@@ -7,6 +7,7 @@ const TABS = [
   { id: "legislators", label: "Legislator Tracker", Icon: Landmark },
   { id: "company", label: "Company Match", Icon: Building2 },
   { id: "grade", label: "10-K Grader", Icon: Gauge },
+  { id: "legal", label: "Legal Savings", Icon: Scale },
 ];
 
 export default function Sidebar({ activeTab, onTabChange }) {

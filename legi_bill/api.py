@@ -11,6 +11,7 @@ from pypdf import PdfReader
 from app.ranking import rank_bills
 from .config import OPENAI_MODEL, load_config
 from .grader import grade_company
+from .legal_intelligence import detect_industry, calculate_savings
 from .storage import init_db, get_all_bills, get_bill_with_summary_and_questions
 
 app = FastAPI(title="Legi-Bill API")
@@ -415,3 +416,47 @@ def get_bill(bill_number: str):
         "metadata": result["summary"]["metadata"] if result["summary"] else {},
         "compliance_questions": [q["question_text"] for q in result["questions"]],
     }
+
+
+@app.post("/api/legal-savings")
+def legal_savings(
+    company_text: Optional[str] = Form(None),
+    state: Optional[str] = Form(None),
+    hourly_rate: Optional[float] = Form(None),
+):
+    """Return an itemized legal-cost savings estimate for a company.
+
+    Runs a keyword match against the bill DB so hours scale with how many
+    bills are actually relevant to this company — making the output unique
+    per company rather than a fixed number.
+
+    Scan/screening tasks use the total DB bill count (a lawyer reads everything
+    to find what applies). Analysis tasks use the matched count (deep work
+    only happens on relevant bills).
+    """
+    industry = detect_industry(company_text or "")
+    conn = get_conn()
+    all_bills = get_all_bills(conn)
+    total_count = len(all_bills)
+
+    # Find bills relevant to this specific company
+    matched_count = 0
+    if company_text and company_text.strip():
+        enriched = []
+        for b in all_bills:
+            rec = get_bill_with_summary_and_questions(conn, b.bill_number)
+            summary_text = rec["summary"]["summary_text"] if rec and rec.get("summary") else ""
+            enriched.append((b, summary_text))
+        ranked = rank_bills(company_text, enriched)
+        matched_count = sum(1 for _, score, _ in ranked if score > 0)
+
+    # Fall back to a reasonable fraction of total if nothing matched
+    if matched_count == 0:
+        matched_count = max(1, total_count // 10)
+
+    return calculate_savings(
+        matched_bill_count=matched_count,
+        industry=industry,
+        state=state,
+        hourly_rate_override=hourly_rate,
+    )

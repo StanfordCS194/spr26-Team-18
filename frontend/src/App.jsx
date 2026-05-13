@@ -5,9 +5,10 @@ import Home from "./components/Home";
 import BillList from "./components/BillList";
 import CompanyMatch from "./components/CompanyMatch";
 import GradeReveal from "./components/GradeReveal";
+import LegalIntelligence from "./components/LegalIntelligence";
 import PlaceholderTab from "./components/PlaceholderTab";
 
-const TAB_IDS = ["home", "bills", "legislators", "company", "grade"];
+const TAB_IDS = ["home", "bills", "legislators", "company", "grade", "legal"];
 
 function tabFromHash() {
   const h = (typeof window !== "undefined" ? window.location.hash : "").slice(1);
@@ -57,6 +58,7 @@ export default function App() {
             />
           )}
           {activeTab === "grade" && <GradeReveal onChatAboutBill={chatAboutBill} />}
+          {activeTab === "legal" && <LegalIntelligence />}
         </div>
       </main>
     </div>

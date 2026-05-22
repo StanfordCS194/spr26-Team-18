@@ -473,6 +473,188 @@ def startup_summary(req: StartupSummaryRequest):
     return {"verdict": verdict, "model": cfg.get("openai_model", OPENAI_MODEL)}
 
 
+class StartupCustomRulesRequest(BaseModel):
+    questionnaire: dict  # { stage, customers, sensitive_data, regulated_industry, gtm, ... }
+    prd_text: Optional[str] = None
+    github_summary: Optional[dict] = None  # passed through so rules can reference repo facts
+
+
+class StartupCustomGradeRequest(BaseModel):
+    rules: list  # [{id, title, weight, what_to_check, fix}]
+    prd_text: Optional[str] = None
+    github_summary: Optional[dict] = None
+    spreadsheet_summary: Optional[dict] = None
+
+
+def _require_openai():
+    cfg = load_config()
+    api_key = cfg.get("openai_api_key", "")
+    if not api_key or api_key.startswith("stub"):
+        raise HTTPException(503, "OPENAI_API_KEY not configured.")
+    return cfg, api_key
+
+
+@app.post("/api/startup/custom-rules")
+def startup_custom_rules(req: StartupCustomRulesRequest):
+    """LLM writes a tailored ruleset for this specific startup.
+
+    Inputs: a short questionnaire + (optionally) the PRD. Output: a JSON list
+    of 5-8 rules with id, title, weight, what_to_check (criteria the grader will
+    use), and a fix. These rules form the "custom" axis in the rubric.
+    """
+    cfg, api_key = _require_openai()
+
+    q = req.questionnaire or {}
+    lines = ["Founder questionnaire:"]
+    for k, v in q.items():
+        if v:
+            lines.append(f"  - {k}: {v}")
+    if req.prd_text:
+        excerpt = req.prd_text[:4000]
+        lines += ["", "PRD excerpt:", excerpt]
+    if req.github_summary:
+        gh = req.github_summary
+        lines += [
+            "",
+            "Repo facts:",
+            f"  - name: {gh.get('fullName')}",
+            f"  - language: {gh.get('language')}",
+            f"  - license: {gh.get('license')}",
+            f"  - files: {', '.join((gh.get('filenames') or [])[:20])}",
+        ]
+    user_msg = "\n".join(lines)
+
+    system = (
+        "You are a startup diligence expert. Given a founder's questionnaire and PRD, "
+        "write a CUSTOM ruleset of 5-8 specific, checkable rules that matter for THIS "
+        "product (not generic best practices already covered by a stock rubric: license, "
+        "tests, README, runway, GDPR/CCPA/COPPA, PRD completeness). Focus on what's unique "
+        "to their stage, customer, industry, data, and GTM. Each rule must be verifiable "
+        "from the PRD text or repo facts a grader will be shown. "
+        "Return ONLY a JSON object: "
+        '{"rules": [{"id": "snake_case_id", "title": "short rule title", '
+        '"weight": 5-20, "what_to_check": "explicit criteria the grader will use", '
+        '"fix": "one-line concrete remediation"}]}. No prose, no markdown fences.'
+    )
+
+    try:
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model=cfg.get("openai_model", OPENAI_MODEL) or "gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.3,
+            max_tokens=900,
+            response_format={"type": "json_object"},
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        parsed = _json.loads(raw)
+        rules = parsed.get("rules") or []
+        if not isinstance(rules, list) or not rules:
+            raise ValueError("LLM returned no rules")
+        cleaned = []
+        for i, r in enumerate(rules[:8]):
+            cleaned.append({
+                "id": str(r.get("id") or f"custom_{i}")[:64],
+                "title": str(r.get("title") or "")[:140],
+                "weight": max(1, min(25, int(r.get("weight") or 8))),
+                "what_to_check": str(r.get("what_to_check") or "")[:600],
+                "fix": str(r.get("fix") or "")[:240],
+            })
+    except Exception as e:
+        raise HTTPException(502, f"Rule generation failed: {e}")
+
+    return {"rules": cleaned, "model": cfg.get("openai_model", OPENAI_MODEL)}
+
+
+@app.post("/api/startup/custom-grade")
+def startup_custom_grade(req: StartupCustomGradeRequest):
+    """LLM grades the repo + PRD against the custom rules. Returns pass/fail
+    per rule with evidence ('observed') the user will see in the drilldown.
+    """
+    cfg, api_key = _require_openai()
+
+    if not req.rules:
+        raise HTTPException(400, "No rules to grade against.")
+
+    lines = ["Rules to evaluate:"]
+    for r in req.rules:
+        lines.append(
+            f"  - id={r.get('id')} | title={r.get('title')} | check: {r.get('what_to_check')}"
+        )
+
+    lines.append("")
+    lines.append("Evidence available:")
+    if req.prd_text:
+        lines += ["PRD:", req.prd_text[:4000]]
+    if req.github_summary:
+        gh = req.github_summary
+        lines += [
+            "",
+            "Repo:",
+            f"  name={gh.get('fullName')} language={gh.get('language')} license={gh.get('license')}",
+            f"  files: {', '.join((gh.get('filenames') or [])[:30])}",
+            f"  hasCI={gh.get('hasCI')} hasTests={gh.get('hasTests')} hasEnvFile={gh.get('hasEnvFile')}",
+            f"  contributors={gh.get('contributorCount')} daysSincePush={gh.get('daysSincePush')}",
+            f"  readme excerpt: {(gh.get('readmeText') or '')[:800]}",
+        ]
+    if req.spreadsheet_summary:
+        s = req.spreadsheet_summary
+        lines += [
+            "",
+            "Finance:",
+            f"  rows={s.get('rowCount')} runway_months={s.get('runway')} "
+            f"monthlyRevenue={s.get('monthlyRevenue')} hasCategories={s.get('hasCategories')}",
+        ]
+
+    user_msg = "\n".join(lines)
+
+    system = (
+        "You are evaluating a startup against a CUSTOM ruleset. For each rule, decide "
+        "passed=true/false STRICTLY from the evidence shown. If evidence is missing, "
+        "passed=false and say so in observed. Never invent facts. "
+        "Return ONLY JSON: "
+        '{"results": [{"id": "<rule id>", "passed": bool, '
+        '"observed": "<1 short sentence of evidence>"}]}. '
+        "Include every rule id exactly once. No markdown fences."
+    )
+
+    try:
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model=cfg.get("openai_model", OPENAI_MODEL) or "gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.1,
+            max_tokens=900,
+            response_format={"type": "json_object"},
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        parsed = _json.loads(raw)
+        results = parsed.get("results") or []
+        by_id = {str(r.get("id")): r for r in results if isinstance(r, dict)}
+        cleaned = []
+        for r in req.rules:
+            rid = str(r.get("id"))
+            hit = by_id.get(rid) or {}
+            cleaned.append({
+                "id": rid,
+                "title": r.get("title"),
+                "weight": r.get("weight"),
+                "passed": bool(hit.get("passed", False)),
+                "observed": str(hit.get("observed") or "no evidence found")[:240],
+                "fix": r.get("fix") or "",
+            })
+    except Exception as e:
+        raise HTTPException(502, f"Custom grading failed: {e}")
+
+    return {"results": cleaned, "model": cfg.get("openai_model", OPENAI_MODEL)}
+
+
 @app.get("/api/bills/{bill_number}")
 def get_bill(bill_number: str):
     result = get_bill_with_summary_and_questions(get_conn(), bill_number)

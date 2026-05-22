@@ -1,0 +1,407 @@
+{
+  "AAPL": {
+    "company": "Apple Inc.",
+    "is_featured": true,
+    "generated_at": "2026-04-29T04:39:11.949417+00:00",
+    "axes": {
+      "emissions": {
+        "score": 20,
+        "evidence": []
+      },
+      "water": {
+        "score": 10,
+        "evidence": []
+      },
+      "packaging": {
+        "score": 70,
+        "evidence": [
+          {
+            "bill_number": "AB1080",
+            "rationale": "Apple's operations involve significant packaging for its products, which are subject to regulations aimed at reducing waste and promoting recycling.",
+            "bill_quote": "Solid waste: packaging and products.",
+            "company_quote": "The Company designs, manufactures and markets smartphones, personal computers, tablets, wearables and accessories, and sells a variety of related services."
+          },
+          {
+            "bill_number": "SB54",
+            "rationale": "As a major producer of consumer electronics, Apple is impacted by regulations concerning packaging waste and plastic pollution.",
+            "bill_quote": "Solid waste: reporting, packaging, and plastic food service ware.",
+            "company_quote": "The Company designs, manufactures and markets smartphones, personal computers, tablets, wearables and accessories, and sells a variety of related services."
+          }
+        ]
+      },
+      "labor": {
+        "score": 15,
+        "evidence": []
+      },
+      "disclosure": {
+        "score": 90,
+        "evidence": [
+          {
+            "bill_number": "SB253",
+            "rationale": "As a public company with significant revenue, Apple is required to disclose climate-related financial risks and emissions data under California law.",
+            "bill_quote": "Climate Corporate Data Accountability.",
+            "company_quote": "The Company assumes no obligation to revise or update any forward-looking statements for any reason, except as required by law."
+          },
+          {
+            "bill_number": "SB261",
+            "rationale": "Apple's scale and public reporting obligations necessitate compliance with enhanced climate disclosure requirements.",
+            "bill_quote": "Greenhouse Gases: climate-related financial risk.",
+            "company_quote": "The Company assumes no obligation to revise or update any forward-looking statements for any reason, except as required by law."
+          }
+        ]
+      }
+    },
+    "composite": 45,
+    "grade": "C",
+    "top_bills": [
+      {
+        "bill_number": "AB1080",
+        "title": "Solid waste: packaging and products.",
+        "primary_axis": "packaging",
+        "rationale": "Apple's extensive product packaging is directly affected by regulations aimed at reducing waste.",
+        "url": "https://legiscan.com/CA/bill/AB1080/2019"
+      },
+      {
+        "bill_number": "SB54",
+        "title": "Solid waste: reporting, packaging, and plastic food service ware.",
+        "primary_axis": "packaging",
+        "rationale": "Apple's operations in consumer electronics involve packaging that is subject to regulations on plastic pollution.",
+        "url": "https://legiscan.com/CA/bill/SB54/2021"
+      },
+      {
+        "bill_number": "SB1237",
+        "title": "Methane.",
+        "primary_axis": "disclosure",
+        "rationale": "High token-overlap relevance (0.71).",
+        "url": "https://legiscan.com/CA/bill/SB1237/2023"
+      }
+    ],
+    "no_signal": false,
+    "ticker": "AAPL",
+    "name": "Apple Inc."
+  },
+  "TSLA": {
+    "company": "Tesla, Inc.",
+    "is_featured": true,
+    "generated_at": "2026-04-29T04:39:22.669558+00:00",
+    "axes": {
+      "emissions": {
+        "score": 60,
+        "evidence": []
+      },
+      "water": {
+        "score": 20,
+        "evidence": []
+      },
+      "packaging": {
+        "score": 40,
+        "evidence": []
+      },
+      "labor": {
+        "score": 30,
+        "evidence": []
+      },
+      "disclosure": {
+        "score": 80,
+        "evidence": [
+          {
+            "bill_number": "SB253",
+            "rationale": "As a public company, the company is required to disclose climate-related financial risks and greenhouse gas emissions, aligning with SB253's mandates for corporate climate disclosure.",
+            "bill_quote": "An act relating to corporate climate disclosure.",
+            "company_quote": "We do not assume any obligation to update any forward-looking statements."
+          },
+          {
+            "bill_number": "SB261",
+            "rationale": "The company must adhere to SB261's requirements for enhanced climate-related disclosures due to its public reporting status and significant revenue.",
+            "bill_quote": "An act relating to climate-related financial risk disclosures.",
+            "company_quote": "We may not actually achieve the plans, intentions or expectations disclosed in our forward-looking statements."
+          },
+          {
+            "bill_number": "AB1305",
+            "rationale": "The company's involvement in carbon offset purchases necessitates compliance with AB1305, which regulates voluntary carbon market disclosures.",
+            "bill_quote": "An act relating to voluntary carbon market disclosures.",
+            "company_quote": "We design, develop, manufacture, sell and lease high-performance fully electric vehicles."
+          }
+        ]
+      }
+    },
+    "composite": 49,
+    "grade": "C",
+    "top_bills": [
+      {
+        "bill_number": "SB1237",
+        "title": "Methane.",
+        "primary_axis": "disclosure",
+        "rationale": "High token-overlap relevance (0.69).",
+        "url": "https://legiscan.com/CA/bill/SB1237/2023"
+      },
+      {
+        "bill_number": "AB2327",
+        "title": "Carpenter-Presley-Tanner Hazardous Substance Account Act: conforming revisions.",
+        "primary_axis": "disclosure",
+        "rationale": "High token-overlap relevance (0.59).",
+        "url": "https://legiscan.com/CA/bill/AB2327/2021"
+      },
+      {
+        "bill_number": "AB148",
+        "title": "Public resources.",
+        "primary_axis": "disclosure",
+        "rationale": "High token-overlap relevance (0.53).",
+        "url": "https://legiscan.com/CA/bill/AB148/2021"
+      }
+    ],
+    "no_signal": false,
+    "ticker": "TSLA",
+    "name": "Tesla, Inc."
+  },
+  "CVX": {
+    "company": "Chevron Corp.",
+    "is_featured": true,
+    "generated_at": "2026-04-29T04:39:36.741365+00:00",
+    "axes": {
+      "emissions": {
+        "score": 85,
+        "evidence": [
+          {
+            "bill_number": "SB1237",
+            "rationale": "Chevron's upstream operations involve the exploration and production of crude oil and natural gas, which are significant sources of methane emissions. SB1237 targets methane emissions from oil and gas operations.",
+            "bill_quote": "An act to amend Sections 7196.2, 12240, 13400, 13404, 13440, 13442, 13470, and 13531 of the Business and Professions Code...",
+            "company_quote": "Upstream operations consist primarily of exploring for, developing, producing and transporting crude oil and natural gas."
+          },
+          {
+            "bill_number": "SB254",
+            "rationale": "Chevron's operations include carbon capture and storage, which is relevant to SB254 as it addresses energy-related emissions and the transition to lower carbon energy sources.",
+            "bill_quote": "An act to amend Sections 4216.1, 8557, 12100.110, 15472, 15473, 15475, 15475.1, 15475.2...",
+            "company_quote": "Our objective is to safely deliver higher returns, lower carbon and superior shareholder value in any business environment."
+          }
+        ]
+      },
+      "water": {
+        "score": 40,
+        "evidence": [
+          {
+            "bill_number": "AB2327",
+            "rationale": "Chevron's operations in oil and gas extraction can impact water resources, making them subject to regulations like AB2327, which addresses hazardous substances that may affect water quality.",
+            "bill_quote": "An act to amend Section 7058.7 of the Business and Professions Code...",
+            "company_quote": "Chevron competes with fully integrated, major global petroleum companies, as well as independent and national petroleum companies."
+          }
+        ]
+      },
+      "packaging": {
+        "score": 20,
+        "evidence": []
+      },
+      "labor": {
+        "score": 30,
+        "evidence": []
+      },
+      "disclosure": {
+        "score": 90,
+        "evidence": [
+          {
+            "bill_number": "SB253",
+            "rationale": "As a public company, Chevron must comply with disclosure requirements related to climate-related financial risks, making SB253 highly relevant.",
+            "bill_quote": "An act relating to corporate climate disclosure...",
+            "company_quote": "Chevron Corporation manages its investments in subsidiaries and affiliates and provides administrative, financial, management and technology support."
+          },
+          {
+            "bill_number": "SB261",
+            "rationale": "Chevron's size and public reporting obligations necessitate adherence to SB261, which focuses on climate-related disclosures for large companies.",
+            "bill_quote": "An act to amend Section 25100 of the Corporations Code, relating to corporate climate disclosure...",
+            "company_quote": "Chevron competes with fully integrated, major petroleum companies, as well as independent refining and marketing, transportation and chemicals entities."
+          }
+        ]
+      }
+    },
+    "composite": 56,
+    "grade": "C-",
+    "top_bills": [
+      {
+        "bill_number": "SB1237",
+        "title": "Methane.",
+        "primary_axis": "emissions",
+        "rationale": "Chevron's upstream operations are directly impacted by SB1237, which targets methane emissions from oil and gas production.",
+        "url": "https://legiscan.com/CA/bill/SB1237/2023"
+      },
+      {
+        "bill_number": "SB254",
+        "title": "Energy.",
+        "primary_axis": "emissions",
+        "rationale": "SB254 is relevant to Chevron's commitment to lower carbon operations and its carbon capture initiatives.",
+        "url": "https://legiscan.com/CA/bill/SB254/2025"
+      },
+      {
+        "bill_number": "AB2327",
+        "title": "Carpenter-Presley-Tanner Hazardous Substance Account Act: conforming revisions.",
+        "primary_axis": "disclosure",
+        "rationale": "High token-overlap relevance (0.65).",
+        "url": "https://legiscan.com/CA/bill/AB2327/2021"
+      }
+    ],
+    "no_signal": false,
+    "ticker": "CVX",
+    "name": "Chevron Corp."
+  },
+  "KO": {
+    "company": "The Coca-Cola Company",
+    "is_featured": true,
+    "generated_at": "2026-04-29T04:39:47.014681+00:00",
+    "axes": {
+      "emissions": {
+        "score": 10,
+        "evidence": []
+      },
+      "water": {
+        "score": 10,
+        "evidence": []
+      },
+      "packaging": {
+        "score": 80,
+        "evidence": [
+          {
+            "bill_number": "SB54",
+            "rationale": "As a beverage company, Coca-Cola is significantly impacted by regulations regarding packaging and plastic waste, as they produce a large volume of single-use plastic bottles.",
+            "bill_quote": "An act to amend Section 41821.5 of, to add Chapter 3 (commencing with Section 42040) to Part 3 of Division 30 of, and to repeal Section 42064 of the Public Resources Code, relating to solid waste.",
+            "company_quote": "We own and market several of the world\u2019s largest nonalcoholic sparkling soft drink brands, including Coca-Cola, Sprite, Coca-Cola Zero Sugar, Fanta and Diet Coke/Coca-Cola Light."
+          },
+          {
+            "bill_number": "AB1080",
+            "rationale": "Coca-Cola's extensive use of packaging for its beverage products puts it in direct alignment with the provisions of this bill aimed at reducing waste from packaging.",
+            "bill_quote": "An act relating to solid waste: packaging and products.",
+            "company_quote": "We make our branded beverage products available to consumers in various packaging formats."
+          }
+        ]
+      },
+      "labor": {
+        "score": 10,
+        "evidence": []
+      },
+      "disclosure": {
+        "score": 90,
+        "evidence": [
+          {
+            "bill_number": "SB253",
+            "rationale": "As a public company with significant revenue, Coca-Cola must comply with disclosure requirements related to climate risks and greenhouse gas emissions under this bill.",
+            "bill_quote": "An act relating to corporate climate disclosure.",
+            "company_quote": "The Coca-Cola Company is a total beverage company, and beverage products bearing our trademarks, sold in the United States since 1886."
+          },
+          {
+            "bill_number": "SB261",
+            "rationale": "Coca-Cola's status as a public company necessitates adherence to stringent climate-related financial risk disclosures mandated by this bill.",
+            "bill_quote": "An act relating to climate-related financial risk disclosures.",
+            "company_quote": "We operate in more than 200 countries and territories."
+          }
+        ]
+      }
+    },
+    "composite": 45,
+    "grade": "C",
+    "top_bills": [
+      {
+        "bill_number": "AB1080",
+        "title": "Solid waste: packaging and products.",
+        "primary_axis": "packaging",
+        "rationale": "Coca-Cola's extensive use of packaging for its beverage products makes it a target for regulations aimed at reducing packaging waste.",
+        "url": "https://legiscan.com/CA/bill/AB1080/2019"
+      },
+      {
+        "bill_number": "SB54",
+        "title": "Solid waste: reporting, packaging, and plastic food service ware.",
+        "primary_axis": "packaging",
+        "rationale": "As a major beverage producer, Coca-Cola is significantly impacted by regulations on plastic waste and packaging.",
+        "url": "https://legiscan.com/CA/bill/SB54/2021"
+      },
+      {
+        "bill_number": "SB1237",
+        "title": "Methane.",
+        "primary_axis": "disclosure",
+        "rationale": "High token-overlap relevance (0.63).",
+        "url": "https://legiscan.com/CA/bill/SB1237/2023"
+      }
+    ],
+    "no_signal": false,
+    "ticker": "KO",
+    "name": "The Coca-Cola Company"
+  },
+  "LEVI": {
+    "company": "Levi Strauss & Co.",
+    "is_featured": true,
+    "generated_at": "2026-04-29T04:39:56.309808+00:00",
+    "axes": {
+      "emissions": {
+        "score": 10,
+        "evidence": []
+      },
+      "water": {
+        "score": 10,
+        "evidence": []
+      },
+      "packaging": {
+        "score": 70,
+        "evidence": [
+          {
+            "bill_number": "SB54",
+            "rationale": "As a company that likely utilizes packaging for its products, this bill on solid waste and packaging directly impacts its operations and compliance requirements.",
+            "bill_quote": "An act to amend Section 41821.5 of, to add Chapter 3 (commencing with Section 42040) to Part 3 of Division 30 of, and to repeal Section 42064 of the Public Resources Code, relating to solid waste.",
+            "company_quote": "our focus on elevating, expanding and strengthening our brand globally and our continued focus on direct-to-consumer channels"
+          },
+          {
+            "bill_number": "AB1080",
+            "rationale": "This bill addresses solid waste and packaging, which is relevant for a company that produces consumer goods requiring packaging.",
+            "bill_quote": "An act to amend Sections 42355 and 42356 of the Public Resources Code, relating to solid waste: packaging and products.",
+            "company_quote": "our expectations regarding annual net revenue growth and gross and Adjusted EBIT margins"
+          }
+        ]
+      },
+      "labor": {
+        "score": 20,
+        "evidence": []
+      },
+      "disclosure": {
+        "score": 80,
+        "evidence": [
+          {
+            "bill_number": "SB253",
+            "rationale": "As a public company with significant revenue, this bill mandates climate-related disclosures that directly affect its reporting obligations.",
+            "bill_quote": "An act to add Section 25100.5 to the Corporations Code, relating to corporate climate disclosure.",
+            "company_quote": "our commitment to increasing total shareholder returns through our capital allocation priorities"
+          },
+          {
+            "bill_number": "SB261",
+            "rationale": "This bill enhances the requirements for climate-related financial risk disclosures, which are crucial for a public company like this one.",
+            "bill_quote": "An act to amend Section 25100 of the Corporations Code, relating to climate-related financial risk disclosures.",
+            "company_quote": "our anticipated financial performance and business prospects"
+          }
+        ]
+      }
+    },
+    "composite": 42,
+    "grade": "C+",
+    "top_bills": [
+      {
+        "bill_number": "AB1080",
+        "title": "Solid waste: packaging and products.",
+        "primary_axis": "packaging",
+        "rationale": "This bill addresses packaging waste, which is highly relevant for a consumer goods company.",
+        "url": "https://legiscan.com/CA/bill/AB1080/2019"
+      },
+      {
+        "bill_number": "SB54",
+        "title": "Solid waste: reporting, packaging, and plastic food service ware.",
+        "primary_axis": "packaging",
+        "rationale": "This bill focuses on solid waste and packaging regulations that directly impact the company's operations.",
+        "url": "https://legiscan.com/CA/bill/SB54/2021"
+      },
+      {
+        "bill_number": "SB1237",
+        "title": "Methane.",
+        "primary_axis": "disclosure",
+        "rationale": "High token-overlap relevance (0.70).",
+        "url": "https://legiscan.com/CA/bill/SB1237/2023"
+      }
+    ],
+    "no_signal": false,
+    "ticker": "LEVI",
+    "name": "Levi Strauss & Co."
+  }
+}

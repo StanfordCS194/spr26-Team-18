@@ -1,11 +1,12 @@
-import { Landmark, Gauge, Sparkles, MessageCircle } from "lucide-react";
+import { Home, Scale, Sparkles, MessageCircle, Gauge } from "lucide-react";
 import logo from "../assets/logo.png";
 
 const TABS = [
+  { id: "home",    label: "Home",           Icon: Home },
   { id: "startup", label: "Startup Health", Icon: Sparkles },
-  { id: "legal", label: "Legal", Icon: Landmark },
-  { id: "recs", label: "Recommendations", Icon: MessageCircle },
-  { id: "financial", label: "Financial", Icon: Gauge },
+  { id: "legal",   label: "Legal",          Icon: Scale },
+  { id: "recs",    label: "Recommendations", Icon: MessageCircle },
+  { id: "financial", label: "Financial",    Icon: Gauge },
 ];
 
 export default function Sidebar({ activeTab, onTabChange }) {

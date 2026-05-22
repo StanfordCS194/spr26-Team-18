@@ -1,7 +1,7 @@
 // Deterministic rubric: features (from extractors) -> 5 sub-grades + actions.
 // Each rule = { id, axis, weight, check(features), evidence, fix, dollarImpact }
-// score = 100 - (sum of failed weights / sum of all weights * 100)
-// Composite = equal-weight average of the 5 axis scores.
+// score = 100 - (sum of failed weights / sum of evaluated weights * 100)
+// Composite = equal-weight average of axes with at least one evaluated rule.
 
 export const AXES = ["engineering", "legal", "financial", "compliance", "product", "custom"];
 
@@ -22,6 +22,24 @@ export const AXIS_BLURBS = {
   product: "PRD completeness — problem, users, metrics, scope, timeline.",
   custom: "Rules an LLM wrote specifically for this product, then graded.",
 };
+
+function repoFindingSummary(findings = []) {
+  if (!findings.length) return "no repo compliance findings";
+  const high = findings.filter((f) => f.severity === "high").length;
+  const medium = findings.filter((f) => f.severity === "medium").length;
+  return `${high} high, ${medium} medium repo findings`;
+}
+
+function repoFindingLocations(findings = [], limit = 5) {
+  return findings.slice(0, limit).map((finding) => ({
+    path: finding.path,
+    line: finding.line,
+    snippet: finding.snippet,
+    title: finding.title,
+    recommendation: finding.recommendation,
+    severity: finding.severity,
+  }));
+}
 
 // ---- Rules ----
 // Every rule returns { passed: bool, observed?: string }
@@ -368,6 +386,45 @@ export const RULES = [
     fix: "Most enterprise contracts > $50k/yr will ask for SOC2. Plan it for ~12mo before you need it.",
     dollarImpact: 0,
   },
+  {
+    id: "comp_repo_high_risk",
+    axis: "compliance",
+    title: "Repo scan has no high-risk compliance findings",
+    weight: 18,
+    check: (f) => {
+      const findings = f.github?.complianceFindings || [];
+      const high = findings.filter((finding) => finding.severity === "high");
+      return {
+        passed: high.length === 0,
+        observed: f.github ? repoFindingSummary(findings) : "no GitHub repo scanned",
+        locations: repoFindingLocations(high),
+      };
+    },
+    fix: "Fix the high-risk repo findings first. They point to specific files/lines where auth, minors, health data, cookies, or secrets need remediation.",
+    dollarImpact: 75000,
+  },
+  {
+    id: "comp_repo_personal_data",
+    axis: "compliance",
+    title: "Personal-data code paths have governance controls",
+    weight: 12,
+    check: (f) => {
+      const findings = (f.github?.complianceFindings || []).filter((finding) =>
+        ["repo_personal_data_controls", "repo_tracking_sdk"].includes(finding.id)
+      );
+      return {
+        passed: findings.length === 0,
+        observed: f.github
+          ? findings.length
+            ? `${findings.length} personal-data/tracking code findings`
+            : "no ungoverned personal-data code paths found"
+          : "no GitHub repo scanned",
+        locations: repoFindingLocations(findings),
+      };
+    },
+    fix: "Add consent, retention, deletion, and data-sharing controls next to the code that collects or tracks personal data.",
+    dollarImpact: 25000,
+  },
 
   // ---------- Product Coherence ----------
   {
@@ -463,9 +520,37 @@ export const RULES = [
 // (so an A startup without a custom scan still grades as an A).
 export function scoreFeatures(features, customAxis = null) {
   const byAxis = {};
-  for (const axis of AXES) byAxis[axis] = { score: 0, totalWeight: 0, failedWeight: 0, results: [] };
+  for (const axis of AXES) {
+    byAxis[axis] = {
+      score: null,
+      totalWeight: 0,
+      failedWeight: 0,
+      skippedWeight: 0,
+      evaluatedCount: 0,
+      skippedCount: 0,
+      results: [],
+    };
+  }
 
   for (const rule of RULES) {
+    const missingInput = missingRequiredInput(rule, features);
+    if (missingInput) {
+      byAxis[rule.axis].skippedWeight += rule.weight;
+      byAxis[rule.axis].skippedCount += 1;
+      byAxis[rule.axis].results.push({
+        id: rule.id,
+        title: rule.title,
+        weight: rule.weight,
+        passed: null,
+        status: "skipped",
+        observed: `${missingInput} not provided`,
+        locations: [],
+        fix: "",
+        dollarImpact: 0,
+      });
+      continue;
+    }
+
     let res;
     try {
       res = rule.check(features);
@@ -474,13 +559,16 @@ export function scoreFeatures(features, customAxis = null) {
     }
     const passed = !!res.passed;
     byAxis[rule.axis].totalWeight += rule.weight;
+    byAxis[rule.axis].evaluatedCount += 1;
     if (!passed) byAxis[rule.axis].failedWeight += rule.weight;
     byAxis[rule.axis].results.push({
       id: rule.id,
       title: rule.title,
       weight: rule.weight,
       passed,
+      status: passed ? "passed" : "failed",
       observed: res.observed || "",
+      locations: res.locations || [],
       fix: rule.fix,
       dollarImpact: rule.dollarImpact || 0,
     });
@@ -505,7 +593,7 @@ export function scoreFeatures(features, customAxis = null) {
 
   for (const axis of AXES) {
     const a = byAxis[axis];
-    a.score = a.totalWeight > 0 ? Math.round(((a.totalWeight - a.failedWeight) / a.totalWeight) * 100) : 0;
+    a.score = a.totalWeight > 0 ? Math.round(((a.totalWeight - a.failedWeight) / a.totalWeight) * 100) : null;
   }
 
   // Composite: average of axes that actually have rules. If the user skipped
@@ -531,6 +619,23 @@ export function scoreFeatures(features, customAxis = null) {
     .slice(0, 5);
 
   return { axes: byAxis, composite, grade, topActions, scoredAxes };
+function missingRequiredInput(rule, features) {
+  const required = requiredInputForRule(rule);
+  if (required === "github" && !features.github) return "GitHub repo";
+  if (required === "prd" && !features.prd) return "PRD";
+  if (required === "spreadsheet" && !features.spreadsheet) return "finance spreadsheet";
+  return null;
+}
+
+function requiredInputForRule(rule) {
+  if (rule.axis === "engineering") return "github";
+  if (rule.axis === "financial") return "spreadsheet";
+  if (rule.axis === "product") return "prd";
+  if (rule.id === "legal_license_safe") return "github";
+  if (rule.axis === "legal") return "prd";
+  if (rule.id.startsWith("comp_repo_")) return "github";
+  if (rule.axis === "compliance") return "prd";
+  return null;
 }
 
 export function letterGrade(score) {

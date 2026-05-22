@@ -1,8 +1,9 @@
 import json as _json
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
@@ -12,6 +13,7 @@ from pypdf import PdfReader
 from app.ranking import rank_bills
 from .config import OPENAI_MODEL, load_config
 from .grader import grade_company
+from .legal_intelligence import detect_industry, calculate_savings
 from .storage import init_db, get_all_bills, get_bill_with_summary_and_questions
 
 app = FastAPI(title="Legi-Bill API")
@@ -78,7 +80,48 @@ def _extract_text(file: UploadFile) -> str:
     if name.endswith(".pdf"):
         reader = PdfReader(BytesIO(data))
         return "\n".join((p.extract_text() or "") for p in reader.pages)
+    if name.endswith(".csv"):
+        df = pd.read_csv(StringIO(data.decode("utf-8", errors="replace")))
+        return _df_to_text(df)
+    if name.endswith((".xlsx", ".xls")):
+        excel = pd.ExcelFile(BytesIO(data))
+        parts = []
+        for sheet in excel.sheet_names:
+            df = excel.parse(sheet)
+            parts.append(f"Sheet: {sheet}\n{_df_to_text(df)}")
+        return "\n\n".join(parts)
     return data.decode("utf-8", errors="replace")
+
+
+def _df_to_text(df: pd.DataFrame) -> str:
+    df = df.dropna(how="all").dropna(axis=1, how="all")
+    lines = [f"Columns: {', '.join(str(c) for c in df.columns)}"]
+    for _, row in df.iterrows():
+        pairs = [f"{col}: {val}" for col, val in row.items() if pd.notna(val)]
+        if pairs:
+            lines.append(" | ".join(pairs))
+    return "\n".join(lines)
+@app.post("/api/startup/prd/extract")
+def extract_startup_prd(file: UploadFile = File(...)):
+    """Extract PRD text for the startup health grader.
+
+    Text/Markdown can be parsed in the browser, but PDFs need backend parsing
+    via pypdf. The frontend still runs the deterministic PRD rubric locally
+    after receiving this text.
+    """
+    if not file.filename:
+        raise HTTPException(400, "Upload a PRD file.")
+    try:
+        text = _extract_text(file)
+    except Exception as e:
+        raise HTTPException(400, f"Could not read PRD: {e}")
+    if not text.strip():
+        raise HTTPException(400, "No readable text found in PRD.")
+    return {
+        "filename": file.filename,
+        "text": text,
+        "length": len(text),
+    }
 
 
 @app.post("/api/match")
@@ -401,27 +444,18 @@ class StartupSummaryRequest(BaseModel):
     name: str
     grade: str
     composite: int
-    axes: dict  # { axis_key: {score, results: [{title, passed, observed, fix, weight}]} }
-    top_actions: list  # [{title, fix, axis, weight, dollarImpact}]
+    axes: dict
+    top_actions: list
 
 
 @app.post("/api/startup/summary")
 def startup_summary(req: StartupSummaryRequest):
-    """LLM-synthesized 2-3 sentence verdict over a deterministic startup grade.
-
-    The grade itself is computed client-side by the rubric. This endpoint takes
-    the structured result and produces a narrative verdict — no scoring, no
-    rule evaluation. Pure synthesis. If OPENAI_API_KEY is missing, returns a
-    503 so the frontend can render its deterministic fallback.
-    """
+    """Synthesize a short verdict over the deterministic startup-health grade."""
     cfg = load_config()
     api_key = cfg.get("openai_api_key", "")
     if not api_key or api_key.startswith("stub"):
         raise HTTPException(503, "OPENAI_API_KEY not configured.")
 
-    # Compress the structured payload into a compact prompt. We pass the failed
-    # rules per axis (passed rules don't help the verdict) plus the headline
-    # numbers. The LLM sees plain text, not JSON, to discourage echoing.
     lines = [
         f"Startup: {req.name}",
         f"Composite grade: {req.grade} ({req.composite}/100)",
@@ -432,11 +466,11 @@ def startup_summary(req: StartupSummaryRequest):
         lines.append(f"  - {axis_key}: {axis_data.get('score', 0)}/100")
 
     lines.append("")
-    lines.append("Failed rules (the things hurting the grade):")
+    lines.append("Failed rules:")
     seen = 0
     for axis_key, axis_data in req.axes.items():
         for r in axis_data.get("results", []):
-            if not r.get("passed"):
+            if r.get("passed") is False:
                 lines.append(f"  - [{axis_key}] {r.get('title')} — {r.get('observed')}")
                 seen += 1
                 if seen >= 12:
@@ -444,15 +478,11 @@ def startup_summary(req: StartupSummaryRequest):
         if seen >= 12:
             break
 
-    facts = "\n".join(lines)
-
     system = (
-        "You are a no-nonsense startup advisor. You will be shown a STRUCTURED grade "
-        "produced by a deterministic rubric (not by you — do not re-grade). Your job is to "
-        "write a 2-3 sentence VERDICT in plain English that synthesizes what's strong, what's "
-        "the single biggest risk, and one concrete next step. Be direct, specific, and "
-        "founder-friendly. Do not invent facts not present in the input. No bullet points. "
-        "No headers. Plain prose only."
+        "You are a no-nonsense startup advisor. You will be shown a structured grade "
+        "produced by a deterministic rubric. Do not re-grade. Write a 2-3 sentence "
+        "verdict that synthesizes what's strong, the single biggest risk, and one "
+        "concrete next step. Do not invent facts. No bullets or headers."
     )
 
     try:
@@ -461,7 +491,7 @@ def startup_summary(req: StartupSummaryRequest):
             model=cfg.get("openai_model", OPENAI_MODEL) or "gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system},
-                {"role": "user", "content": facts},
+                {"role": "user", "content": "\n".join(lines)},
             ],
             temperature=0.4,
             max_tokens=180,
@@ -674,3 +704,47 @@ def get_bill(bill_number: str):
         "metadata": result["summary"]["metadata"] if result["summary"] else {},
         "compliance_questions": [q["question_text"] for q in result["questions"]],
     }
+
+
+@app.post("/api/legal-savings")
+def legal_savings(
+    company_text: Optional[str] = Form(None),
+    state: Optional[str] = Form(None),
+    hourly_rate: Optional[float] = Form(None),
+):
+    """Return an itemized legal-cost savings estimate for a company.
+
+    Runs a keyword match against the bill DB so hours scale with how many
+    bills are actually relevant to this company — making the output unique
+    per company rather than a fixed number.
+
+    Scan/screening tasks use the total DB bill count (a lawyer reads everything
+    to find what applies). Analysis tasks use the matched count (deep work
+    only happens on relevant bills).
+    """
+    industry = detect_industry(company_text or "")
+    conn = get_conn()
+    all_bills = get_all_bills(conn)
+    total_count = len(all_bills)
+
+    # Find bills relevant to this specific company
+    matched_count = 0
+    if company_text and company_text.strip():
+        enriched = []
+        for b in all_bills:
+            rec = get_bill_with_summary_and_questions(conn, b.bill_number)
+            summary_text = rec["summary"]["summary_text"] if rec and rec.get("summary") else ""
+            enriched.append((b, summary_text))
+        ranked = rank_bills(company_text, enriched)
+        matched_count = sum(1 for _, score, _ in ranked if score > 0)
+
+    # Fall back to a reasonable fraction of total if nothing matched
+    if matched_count == 0:
+        matched_count = max(1, total_count // 10)
+
+    return calculate_savings(
+        matched_bill_count=matched_count,
+        industry=industry,
+        state=state,
+        hourly_rate_override=hourly_rate,
+    )

@@ -1,8 +1,15 @@
 // Client-side extractors. GitHub uses live REST API (no auth, public repos only).
-// CSV + PRD parsed in-browser. PDF parsing intentionally out of scope for MVP —
-// drop a .md or .txt PRD instead.
+// CSV + text PRDs are parsed in-browser. PDF PRDs are sent to the backend for
+// text extraction, then scored locally by the same deterministic PRD rubric.
 
 const GH = "https://api.github.com";
+const RAW_GH = "https://raw.githubusercontent.com";
+const MAX_SCANNED_FILES = 35;
+const MAX_FILE_BYTES = 90000;
+
+const SCANNABLE_EXTENSIONS = /\.(js|jsx|ts|tsx|py|rb|go|java|kt|php|cs|rs|swift|sql|html|env|yml|yaml|json|md|txt)$/i;
+const SCANNABLE_NAMES = /(^|\/)(dockerfile|nginx\.conf|\.env|\.env\.[^/]+|privacy|terms|security|readme)(\.|$)/i;
+const SKIP_PATH = /(^|\/)(node_modules|dist|build|coverage|vendor|\.git|__pycache__|target|public\/assets)\//i;
 
 export async function extractGithub(rawUrl) {
   const url = (rawUrl || "").trim();
@@ -30,11 +37,12 @@ export async function extractGithub(rawUrl) {
   }
 
   // Parallel fetches for the rest.
-  const [contents, contributors, workflows, readmeRes] = await Promise.all([
+  const [contents, contributors, workflows, readmeRes, treeRes] = await Promise.all([
     ghFetch(`/repos/${owner}/${repo}/contents`).catch(() => []),
     ghFetch(`/repos/${owner}/${repo}/contributors?per_page=10`).catch(() => []),
     ghFetch(`/repos/${owner}/${repo}/contents/.github/workflows`).catch(() => null),
     ghFetch(`/repos/${owner}/${repo}/readme`).catch(() => null),
+    ghFetch(`/repos/${owner}/${repo}/git/trees/${meta.default_branch || "main"}?recursive=1`).catch(() => null),
   ]);
 
   const filenames = Array.isArray(contents) ? contents.map((c) => c.name) : [];
@@ -67,6 +75,9 @@ export async function extractGithub(rawUrl) {
 
   const pushedAt = meta.pushed_at ? new Date(meta.pushed_at) : null;
   const daysSincePush = pushedAt ? Math.round((Date.now() - pushedAt.getTime()) / 86400000) : null;
+  const repoFiles = selectRepoFiles(treeRes?.tree || []);
+  const scannedFiles = await fetchRepoFiles(owner, repo, meta.default_branch || "main", repoFiles);
+  const complianceFindings = scanRepoCompliance(scannedFiles);
 
   return {
     owner,
@@ -89,6 +100,12 @@ export async function extractGithub(rawUrl) {
     hasEnvFile,
     hasCI,
     contributorCount: Array.isArray(contributors) ? contributors.length : 0,
+    defaultBranch: meta.default_branch || "main",
+    scannedFileCount: scannedFiles.length,
+    scannedFiles: scannedFiles.map((f) => ({ path: f.path, size: f.text.length })),
+    complianceFindings,
+    highComplianceFindingCount: complianceFindings.filter((f) => f.severity === "high").length,
+    mediumComplianceFindingCount: complianceFindings.filter((f) => f.severity === "medium").length,
   };
 }
 
@@ -108,19 +125,219 @@ async function ghFetch(path) {
   }
 }
 
+function selectRepoFiles(tree) {
+  if (!Array.isArray(tree)) return [];
+  const candidates = tree
+    .filter((item) => item.type === "blob")
+    .filter((item) => !SKIP_PATH.test(item.path || ""))
+    .filter((item) => (item.size || 0) > 0 && (item.size || 0) <= MAX_FILE_BYTES)
+    .filter((item) => SCANNABLE_EXTENSIONS.test(item.path || "") || SCANNABLE_NAMES.test(item.path || ""))
+    .sort((a, b) => filePriority(a.path) - filePriority(b.path));
+  return candidates.slice(0, MAX_SCANNED_FILES);
+}
+
+function filePriority(path = "") {
+  const p = path.toLowerCase();
+  if (/privacy|terms|security|auth|login|signup|account|user|patient|child|minor/.test(p)) return 0;
+  if (/api|route|controller|server|app|main|index|middleware/.test(p)) return 1;
+  if (/package\.json|requirements\.txt|pyproject\.toml|readme|\.env/.test(p)) return 2;
+  return 3;
+}
+
+async function fetchRepoFiles(owner, repo, branch, files) {
+  const out = [];
+  for (const file of files) {
+    const url = `${RAW_GH}/${owner}/${repo}/${encodeURIComponent(branch)}/${file.path
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}`;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) continue;
+      const text = await response.text();
+      if (text && text.length <= MAX_FILE_BYTES) {
+        out.push({ path: file.path, text });
+      }
+    } catch {
+      // Best-effort scan. Core GitHub grading should still work if raw fetches fail.
+    }
+  }
+  return out;
+}
+
+function scanRepoCompliance(files) {
+  const findings = [];
+  const add = (finding) => {
+    const duplicate = findings.some(
+      (f) =>
+        f.id === finding.id &&
+        f.path === finding.path &&
+        f.line === finding.line &&
+        f.snippet === finding.snippet
+    );
+    if (!duplicate) findings.push(finding);
+  };
+
+  for (const file of files) {
+    const lines = file.text.split(/\r?\n/);
+    lines.forEach((lineText, index) => {
+      const line = index + 1;
+      const trimmed = lineText.trim();
+      if (!trimmed) return;
+
+      if (/(localStorage|sessionStorage)\.setItem\s*\([^)]*(token|jwt|auth|session)/i.test(trimmed)) {
+        add(repoFinding({
+          id: "repo_token_storage",
+          severity: "high",
+          path: file.path,
+          line,
+          snippet: trimmed,
+          title: "Auth token stored in browser storage",
+          recommendation:
+            "Move auth tokens to secure, HttpOnly, SameSite cookies or a server-side session.",
+        }));
+      }
+
+      if (/(document\.cookie|setcookie|res\.cookie|response\.set_cookie|cookies\.set)/i.test(trimmed)) {
+        const nearby = lines.slice(index, Math.min(lines.length, index + 4)).join(" ");
+        if (!/httponly|httpOnly/i.test(nearby) || !/secure/i.test(nearby) || !/samesite|sameSite/i.test(nearby)) {
+          add(repoFinding({
+            id: "repo_cookie_flags",
+            severity: "high",
+            path: file.path,
+            line,
+            snippet: trimmed,
+            title: "Cookie appears to be missing security flags",
+            recommendation:
+              "Set HttpOnly, Secure, and SameSite on session/auth cookies, and document the session lifetime.",
+          }));
+        }
+      }
+
+      if (/(child|children|minor|under.?13|coppa)/i.test(trimmed) && !/coppa|parent|guardian|consent/i.test(trimmed)) {
+        add(repoFinding({
+          id: "repo_minor_flow",
+          severity: "high",
+          path: file.path,
+          line,
+          snippet: trimmed,
+          title: "Minor-user flow lacks visible consent handling",
+          recommendation:
+            "Add an age-aware onboarding branch and parental/guardian consent handling for under-13 users.",
+        }));
+      }
+
+      if (/(patient|diagnosis|medication|therapy|clinical|health[_-]?data|symptom)/i.test(trimmed)) {
+        const nearby = lines.slice(Math.max(0, index - 3), Math.min(lines.length, index + 4)).join(" ");
+        if (!/(encrypt|audit|hipaa|phi|baa|retention|access.?control)/i.test(nearby)) {
+          add(repoFinding({
+            id: "repo_health_data_controls",
+            severity: "high",
+            path: file.path,
+            line,
+            snippet: trimmed,
+            title: "Health data appears without nearby PHI safeguards",
+            recommendation:
+              "Add explicit PHI safeguards around this flow: access control, audit logging, encryption, retention, and BAA assumptions.",
+          }));
+        }
+      }
+
+      if (/(api[_-]?key|secret|password|private[_-]?key|access[_-]?token)\s*[:=]\s*['\"][^'\"\s]{12,}/i.test(trimmed)) {
+        add(repoFinding({
+          id: "repo_hardcoded_secret",
+          severity: "high",
+          path: file.path,
+          line,
+          snippet: redactSecret(trimmed),
+          title: "Possible hardcoded secret",
+          recommendation:
+            "Remove this value from source control, rotate it, and load it from a secrets manager or environment variable.",
+        }));
+      }
+
+      if (/(posthog|mixpanel|amplitude|segment|gtag|google-analytics|facebook pixel|fbq\()/i.test(trimmed)) {
+        add(repoFinding({
+          id: "repo_tracking_sdk",
+          severity: "medium",
+          path: file.path,
+          line,
+          snippet: trimmed,
+          title: "Tracking or analytics SDK found",
+          recommendation:
+            "Gate analytics behind consent where required, disable targeted advertising for minors, and document data sharing.",
+        }));
+      }
+
+      if (/\b(email|phone|address|birthdate|date_of_birth|dob|ssn|location|geolocation)\b/i.test(trimmed)) {
+        const nearby = lines.slice(Math.max(0, index - 3), Math.min(lines.length, index + 4)).join(" ");
+        if (!/(delete|deletion|retention|minimi[sz]e|consent|privacy|encrypt)/i.test(nearby)) {
+          add(repoFinding({
+            id: "repo_personal_data_controls",
+            severity: "medium",
+            path: file.path,
+            line,
+            snippet: trimmed,
+            title: "Personal data field lacks nearby data-governance handling",
+            recommendation:
+              "Add a retention/deletion path and privacy rationale for this data field, or remove it from the flow.",
+          }));
+        }
+      }
+    });
+  }
+
+  return findings
+    .sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || a.path.localeCompare(b.path) || a.line - b.line)
+    .slice(0, 30);
+}
+
+function repoFinding({ id, severity, path, line, snippet, title, recommendation }) {
+  return {
+    id,
+    severity,
+    path,
+    line,
+    snippet: snippet.length > 180 ? snippet.slice(0, 177) + "..." : snippet,
+    title,
+    recommendation,
+    display: `${path}:${line}`,
+  };
+}
+
+function severityRank(severity) {
+  return severity === "high" ? 0 : severity === "medium" ? 1 : 2;
+}
+
+function redactSecret(text) {
+  return text.replace(/(['\"])[^'\"\s]{8,}(['\"])/g, "$1[redacted]$2");
+}
+
 // ---- PRD ----
 
 export async function extractPRD(file) {
   if (!file) return null;
   const isText = /\.(md|txt|markdown)$/i.test(file.name) || file.type.startsWith("text/");
-  if (!isText) {
+  const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
+  if (isPdf) {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch("/api/startup/prd/extract", {
+      method: "POST",
+      body: form,
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+      throw new Error(detail.detail || "Could not extract text from PDF PRD.");
+    }
+    const data = await response.json();
     return {
-      filename: file.name,
-      length: 0,
-      parsed: false,
-      note: "PDF parsing not in MVP — upload .md or .txt for full grading.",
-      ...emptyPRDFlags(),
+      ...analyzePRD(data.text || "", data.filename || file.name),
+      parsedFromPdf: true,
     };
+  }
+  if (!isText) {
+    throw new Error("Unsupported PRD type. Upload a PDF, Markdown, or text file.");
   }
   const text = await file.text();
   return analyzePRD(text, file.name);

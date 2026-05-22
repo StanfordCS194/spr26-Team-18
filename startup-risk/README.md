@@ -14,8 +14,8 @@ Current constraints:
 ## Usage
 
 ```bash
-startup-risk scan https://github.com/org/repo --format text
-startup-risk scan /path/to/local/repo --format json
+python3 -m startup_risk.cli scan https://github.com/org/repo --format text
+python3 -m startup_risk.cli scan /path/to/local/repo --format json
 ```
 
 Local paths are supported for development and tests. Remote scans must use public GitHub HTTPS URLs.
@@ -23,7 +23,6 @@ Local paths are supported for development and tests. Remote scans must use publi
 ## Development
 
 ```bash
-python -m pip install -e ".[dev]"
+python3 -m pip install gitpython pydantic rich typer pytest
 pytest
 ```
-

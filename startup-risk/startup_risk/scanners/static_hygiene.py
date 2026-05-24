@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+from startup_risk.core.ids import stable_finding_id
 from startup_risk.core.models import (
     Finding,
     FindingEvidence,
     RepositorySnapshot,
+    Severity,
     SourceLocation,
 )
 
 
 SUSPICIOUS_FILENAME_HINTS = (
-    ".env",
     "credential",
     "credentials",
     "private_key",
@@ -55,10 +56,16 @@ class StaticHygieneScanner:
             findings.append(self._missing_file_finding("missing_security", "SECURITY.md"))
 
         for file in snapshot.files:
-            if _looks_sensitive(file.path):
+            sensitive_rule = _sensitive_filename_rule(file.path)
+            if sensitive_rule is not None:
+                severity = _sensitive_filename_severity(file.path_role)
                 findings.append(
                     Finding(
-                        id=f"{self.id}.suspicious_sensitive_filename.{file.path}",
+                        id=stable_finding_id(
+                            self.id,
+                            "suspicious_sensitive_filename",
+                            file.path,
+                        ),
                         title="Filename may indicate sensitive material",
                         description=(
                             "A repository file name contains wording often associated with "
@@ -66,12 +73,15 @@ class StaticHygieneScanner:
                             "signal only and does not prove the file contains sensitive data."
                         ),
                         category="repository_hygiene",
-                        severity="medium",
+                        severity=severity,
                         confidence="medium",
                         evidence=[
                             FindingEvidence(
                                 location=SourceLocation(path=file.path),
-                                description="The file path matches a cautious sensitive-name heuristic.",
+                                description=(
+                                    f"The {file.path_role} path matches the "
+                                    f"{sensitive_rule} filename heuristic."
+                                ),
                             )
                         ],
                         recommendation=(
@@ -87,7 +97,7 @@ class StaticHygieneScanner:
 
     def _missing_file_finding(self, rule: str, filename: str) -> Finding:
         return Finding(
-            id=f"{self.id}.{rule}",
+            id=stable_finding_id(self.id, rule, "repository-root"),
             title=f"Missing {filename}",
             description=(
                 f"The repository does not include a top-level {filename}. This may make "
@@ -107,12 +117,27 @@ class StaticHygieneScanner:
         )
 
 
-def _looks_sensitive(path: str) -> bool:
+def _sensitive_filename_rule(path: str) -> str | None:
     lower_path = path.lower()
     filename = lower_path.rsplit("/", maxsplit=1)[-1]
     extension = "." + filename.rsplit(".", maxsplit=1)[-1] if "." in filename else ""
-    return (
-        filename in SUSPICIOUS_EXACT_FILENAMES
-        or extension in SUSPICIOUS_EXTENSIONS
-        or any(hint in lower_path for hint in SUSPICIOUS_FILENAME_HINTS)
-    )
+
+    if filename in {".env.example", ".env.sample", ".env.template"}:
+        return None
+    if filename == ".env" or filename.startswith(".env."):
+        return "env_file"
+    if filename in SUSPICIOUS_EXACT_FILENAMES:
+        return "private_key_filename"
+    if extension in SUSPICIOUS_EXTENSIONS:
+        return "private_key_extension"
+    if any(hint in filename for hint in SUSPICIOUS_FILENAME_HINTS):
+        return "sensitive_name"
+    return None
+
+
+def _sensitive_filename_severity(path_role: str) -> Severity:
+    if path_role == "root":
+        return "high"
+    if path_role in {"tests", "examples", "docs"}:
+        return "low"
+    return "medium"

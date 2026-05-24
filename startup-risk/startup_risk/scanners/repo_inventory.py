@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
 
 from startup_risk.core.models import (
-    Finding,
-    FindingEvidence,
+    InventoryCategory,
+    RepositoryInventory,
     RepositorySnapshot,
-    SourceLocation,
 )
 
 
@@ -55,16 +53,33 @@ SCHEMA_FILENAMES = {
     "schema.prisma",
 }
 
-INFRA_CONFIG_FILENAMES = {
+INFRA_FILENAMES = {
     ".dockerignore",
     "docker-compose.yml",
+    "docker-compose.yaml",
     "dockerfile",
+}
+
+INFRA_EXTENSIONS = {
+    ".tf",
+    ".tfvars",
+}
+
+CONFIG_FILENAMES = {
+    ".editorconfig",
+    ".env.example",
+    ".gitignore",
     "netlify.toml",
     "vercel.json",
 }
 
-INFRA_CONFIG_EXTENSIONS = {
-    ".tf",
+CONFIG_EXTENSIONS = {
+    ".cfg",
+    ".conf",
+    ".ini",
+    ".toml",
+    ".yaml",
+    ".yml",
 }
 
 DOC_EXTENSIONS = {
@@ -75,138 +90,72 @@ DOC_EXTENSIONS = {
 }
 
 
-@dataclass(frozen=True)
-class InventoryBucket:
-    id_suffix: str
-    title: str
-    description: str
-    paths: list[str]
-
-
 class RepoInventoryScanner:
-    """Reports static repository inventory signals for downstream scanners."""
+    """Builds static repository inventory metadata for downstream scanners."""
 
     id = "repo_inventory"
     name = "Repository Inventory"
-    version = "1.0.0"
+    version = "1.1.0"
 
-    def scan(self, snapshot: RepositorySnapshot) -> list[Finding]:
-        language_counts = _language_counts(snapshot)
-        buckets = [
-            InventoryBucket(
-                id_suffix="languages",
-                title="Detected languages",
-                description=_language_description(language_counts),
-                paths=[],
+    def __init__(self, *, example_limit: int = 10, include_full_paths: bool = False) -> None:
+        self.example_limit = example_limit
+        self.include_full_paths = include_full_paths
+
+    def scan(self, snapshot: RepositorySnapshot) -> RepositoryInventory:
+        return RepositoryInventory(
+            languages=self._language_inventory(snapshot),
+            docs_files=self._path_inventory(_matching_paths(snapshot, extensions=DOC_EXTENSIONS)),
+            manifest_files=self._path_inventory(
+                _matching_paths(snapshot, filenames=MANIFEST_FILENAMES | LOCKFILE_FILENAMES)
             ),
-            InventoryBucket(
-                id_suffix="manifests",
-                title="Detected dependency manifests",
-                description="Repository contains dependency or package manifest files.",
-                paths=_matching_paths(snapshot, filenames=MANIFEST_FILENAMES),
-            ),
-            InventoryBucket(
-                id_suffix="lockfiles",
-                title="Detected dependency lockfiles",
-                description="Repository contains dependency lockfiles.",
-                paths=_matching_paths(snapshot, filenames=LOCKFILE_FILENAMES),
-            ),
-            InventoryBucket(
-                id_suffix="schemas",
-                title="Detected schema files",
-                description="Repository contains files that appear to define data or API schemas.",
-                paths=_matching_paths(
+            schema_files=self._path_inventory(
+                _matching_paths(
                     snapshot,
                     filenames=SCHEMA_FILENAMES,
                     extensions=SCHEMA_EXTENSIONS,
-                ),
+                )
             ),
-            InventoryBucket(
-                id_suffix="infra_config",
-                title="Detected infrastructure or config files",
-                description="Repository contains deployment, infrastructure, or service config files.",
-                paths=_matching_paths(
+            infra_files=self._path_inventory(
+                _matching_paths(
                     snapshot,
-                    filenames=INFRA_CONFIG_FILENAMES,
-                    extensions=INFRA_CONFIG_EXTENSIONS,
-                ),
-            ),
-            InventoryBucket(
-                id_suffix="docs",
-                title="Detected documentation files",
-                description="Repository contains documentation-like files.",
-                paths=_matching_paths(snapshot, extensions=DOC_EXTENSIONS),
-            ),
-        ]
-
-        findings: list[Finding] = []
-        if language_counts:
-            findings.append(
-                self._finding(
-                    buckets[0],
-                    evidence=[
-                        FindingEvidence(
-                            description=(
-                                f"{language}: {count} file(s) detected by extension."
-                            )
-                        )
-                        for language, count in sorted(language_counts.items())
-                    ],
+                    filenames=INFRA_FILENAMES,
+                    extensions=INFRA_EXTENSIONS,
+                    roles={"infra"},
                 )
-            )
-
-        for bucket in buckets[1:]:
-            if not bucket.paths:
-                continue
-            findings.append(
-                self._finding(
-                    bucket,
-                    evidence=[
-                        FindingEvidence(
-                            location=SourceLocation(path=path),
-                            description="File matched this inventory category.",
-                        )
-                        for path in bucket.paths
-                    ],
+            ),
+            config_files=self._path_inventory(
+                _matching_paths(
+                    snapshot,
+                    filenames=CONFIG_FILENAMES,
+                    extensions=CONFIG_EXTENSIONS,
+                    roles={"config"},
                 )
-            )
-
-        return findings
-
-    def _finding(
-        self,
-        bucket: InventoryBucket,
-        *,
-        evidence: list[FindingEvidence],
-    ) -> Finding:
-        return Finding(
-            id=f"{self.id}.{bucket.id_suffix}",
-            title=bucket.title,
-            description=bucket.description,
-            category="repository_inventory",
-            severity="info",
-            confidence="high",
-            evidence=evidence,
-            recommendation="Use this inventory signal to decide which deeper scanners should run.",
-            scanner_id=self.id,
-            scanner_version=self.version,
+            ),
         )
 
+    def _language_inventory(self, snapshot: RepositorySnapshot) -> InventoryCategory:
+        counts: Counter[str] = Counter()
+        for file in snapshot.files:
+            language = LANGUAGE_EXTENSIONS.get(file.extension)
+            if language is not None:
+                counts[language] += 1
 
-def _language_counts(snapshot: RepositorySnapshot) -> dict[str, int]:
-    counts: Counter[str] = Counter()
-    for file in snapshot.files:
-        language = LANGUAGE_EXTENSIONS.get(file.extension)
-        if language is not None:
-            counts[language] += 1
-    return dict(counts)
+        examples = [
+            f"{language}: {count} file(s)" for language, count in sorted(counts.items())
+        ]
+        return InventoryCategory(
+            count=len(counts),
+            examples=examples[: self.example_limit],
+            full_paths=None,
+        )
 
-
-def _language_description(language_counts: dict[str, int]) -> str:
-    languages = ", ".join(
-        f"{language} ({count})" for language, count in sorted(language_counts.items())
-    )
-    return f"Repository contains source files for: {languages}."
+    def _path_inventory(self, paths: list[str]) -> InventoryCategory:
+        sorted_paths = sorted(paths)
+        return InventoryCategory(
+            count=len(sorted_paths),
+            examples=sorted_paths[: self.example_limit],
+            full_paths=sorted_paths if self.include_full_paths else None,
+        )
 
 
 def _matching_paths(
@@ -214,14 +163,20 @@ def _matching_paths(
     *,
     filenames: set[str] | None = None,
     extensions: set[str] | None = None,
+    roles: set[str] | None = None,
 ) -> list[str]:
     filenames = filenames or set()
     extensions = extensions or set()
+    roles = roles or set()
     paths: list[str] = []
 
     for file in snapshot.files:
         filename = file.path.lower().rsplit("/", maxsplit=1)[-1]
-        if filename in filenames or file.extension in extensions:
+        if (
+            filename in filenames
+            or file.extension in extensions
+            or file.path_role in roles
+        ):
             paths.append(file.path)
 
-    return sorted(paths)
+    return sorted(set(paths))

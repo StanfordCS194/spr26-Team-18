@@ -17,5 +17,9 @@ def test_cli_scan_json(tmp_path):
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["source"]["kind"] == "local"
+    assert "requested_ref" in payload["source"]
+    assert "resolved_ref" in payload["source"]
+    assert "commit_sha" in payload["source"]
+    assert "inventory" in payload
     assert "findings" in payload
     assert "summary" in payload

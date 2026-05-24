@@ -44,7 +44,12 @@ class RepositoryIngestor:
 
         return self._snapshot_path(
             root=path,
-            source=RepositorySource(kind="local", location=target),
+            source=_source_with_git_metadata(
+                kind="local",
+                location=target,
+                root=path,
+                requested_ref=None,
+            ),
         )
 
     def _ingest_public_github(self, url: str) -> RepositorySnapshot:
@@ -53,10 +58,15 @@ class RepositoryIngestor:
 
         temp_dir = tempfile.TemporaryDirectory(prefix="startup-risk-")
         root = Path(temp_dir.name) / "repo"
-        Repo.clone_from(url, root, multi_options=["--depth", "1"])
+        repo = Repo.clone_from(url, root, multi_options=["--depth", "1"])
         snapshot = self._snapshot_path(
             root=root,
-            source=RepositorySource(kind="github", location=url),
+            source=_source_from_repo(
+                kind="github",
+                location=url,
+                repo=repo,
+                requested_ref=None,
+            ),
         )
         snapshot._temp_dir = temp_dir
         return snapshot
@@ -130,3 +140,55 @@ def _is_public_github_https_url(target: str) -> bool:
         return False
     parts = [part for part in parsed.path.split("/") if part]
     return len(parts) >= 2
+
+
+def _source_with_git_metadata(
+    *,
+    kind: str,
+    location: str,
+    root: Path,
+    requested_ref: str | None,
+) -> RepositorySource:
+    try:
+        repo = Repo(root)
+    except Exception:
+        return RepositorySource(
+            kind=kind,  # type: ignore[arg-type]
+            location=location,
+            requested_ref=requested_ref,
+        )
+    return _source_from_repo(
+        kind=kind,
+        location=location,
+        repo=repo,
+        requested_ref=requested_ref,
+    )
+
+
+def _source_from_repo(
+    *,
+    kind: str,
+    location: str,
+    repo: Repo,
+    requested_ref: str | None,
+) -> RepositorySource:
+    commit_sha = None
+    resolved_ref = None
+    try:
+        commit_sha = repo.head.commit.hexsha
+    except Exception:
+        pass
+    try:
+        resolved_ref = repo.active_branch.name
+    except Exception:
+        try:
+            resolved_ref = repo.head.reference.name
+        except Exception:
+            pass
+    return RepositorySource(
+        kind=kind,  # type: ignore[arg-type]
+        location=location,
+        requested_ref=requested_ref,
+        resolved_ref=resolved_ref,
+        commit_sha=commit_sha,
+    )

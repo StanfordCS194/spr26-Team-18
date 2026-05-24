@@ -4,11 +4,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 
 SourceKind = Literal["local", "github"]
 Severity = Literal["info", "low", "medium", "high", "critical"]
+Confidence = Literal["low", "medium", "high"]
+
+
+def _validate_repo_relative_path(value: str) -> str:
+    if not value:
+        raise ValueError("path must not be empty")
+    path = Path(value)
+    if path.is_absolute():
+        raise ValueError("path must be repo-relative")
+    if ".." in path.parts:
+        raise ValueError("path must not traverse outside the repo")
+    return path.as_posix()
 
 
 class RepositorySource(BaseModel):
@@ -22,7 +34,21 @@ class FileSnapshot(BaseModel):
     size_bytes: int
     extension: str
     text: str | None = None
+    is_binary: bool = False
     skipped_reason: str | None = None
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        return _validate_repo_relative_path(value)
+
+    @model_validator(mode="after")
+    def validate_skipped_file_metadata(self) -> "FileSnapshot":
+        if self.text is not None and self.skipped_reason is not None:
+            raise ValueError("text files cannot also have a skipped_reason")
+        if self.is_binary and self.text is not None:
+            raise ValueError("binary files cannot include decoded text")
+        return self
 
     @property
     def is_text(self) -> bool:
@@ -31,21 +57,56 @@ class FileSnapshot(BaseModel):
 
 class RepositorySnapshot(BaseModel):
     source: RepositorySource
-    root: Path
+    root: Path = Field(exclude=True)
     files: list[FileSnapshot]
+    _temp_dir: object | None = PrivateAttr(default=None)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    @model_validator(mode="after")
+    def sort_files(self) -> "RepositorySnapshot":
+        self.files = sorted(self.files, key=lambda file: file.path)
+        return self
+
+
+class SourceLocation(BaseModel):
+    path: str
+    line_start: int | None = Field(default=None, ge=1)
+    line_end: int | None = Field(default=None, ge=1)
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        return _validate_repo_relative_path(value)
+
+    @model_validator(mode="after")
+    def validate_line_range(self) -> "SourceLocation":
+        if (
+            self.line_start is not None
+            and self.line_end is not None
+            and self.line_end < self.line_start
+        ):
+            raise ValueError("line_end must be greater than or equal to line_start")
+        return self
+
+
+class FindingEvidence(BaseModel):
+    location: SourceLocation | None = None
+    description: str
+    excerpt: str | None = None
+
 
 class Finding(BaseModel):
-    rule_id: str
+    id: str
     title: str
+    description: str
+    category: str
     severity: Severity
-    message: str
-    scanner: str
-    path: str | None = None
-    line: int | None = Field(default=None, ge=1)
-    evidence: str | None = None
+    confidence: Confidence
+    evidence: list[FindingEvidence] = Field(default_factory=list)
+    recommendation: str
+    scanner_id: str
+    scanner_version: str
 
 
 class ScanSummary(BaseModel):
@@ -58,6 +119,11 @@ class ScanResult(BaseModel):
     scanned_at: datetime
     findings: list[Finding]
     summary: ScanSummary
+
+    @model_validator(mode="after")
+    def sort_findings(self) -> "ScanResult":
+        self.findings = sorted(self.findings, key=lambda finding: finding.id)
+        return self
 
     @classmethod
     def from_findings(
@@ -79,10 +145,9 @@ class ScanResult(BaseModel):
         return cls(
             source=source,
             scanned_at=datetime.now(timezone.utc),
-            findings=findings,
+            findings=sorted(findings, key=lambda finding: finding.id),
             summary=ScanSummary(
                 total_findings=len(findings),
                 by_severity=severity_counts,
             ),
         )
-

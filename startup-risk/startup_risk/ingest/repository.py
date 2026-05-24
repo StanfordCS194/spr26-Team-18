@@ -44,7 +44,7 @@ class RepositoryIngestor:
 
         return self._snapshot_path(
             root=path,
-            source=RepositorySource(kind="local", location=str(path)),
+            source=RepositorySource(kind="local", location=target),
         )
 
     def _ingest_public_github(self, url: str) -> RepositorySnapshot:
@@ -58,7 +58,7 @@ class RepositoryIngestor:
             root=root,
             source=RepositorySource(kind="github", location=url),
         )
-        snapshot._temp_dir = temp_dir  # type: ignore[attr-defined]
+        snapshot._temp_dir = temp_dir
         return snapshot
 
     def _snapshot_path(self, *, root: Path, source: RepositorySource) -> RepositorySnapshot:
@@ -73,7 +73,7 @@ class RepositoryIngestor:
             if any(part in self.ignored_dirs for part in path.relative_to(root).parts):
                 continue
             paths.append(path)
-        return sorted(paths)
+        return sorted(paths, key=lambda path: path.relative_to(root).as_posix())
 
     def _read_file(self, path: Path, root: Path) -> FileSnapshot:
         relative_path = path.relative_to(root).as_posix()
@@ -84,6 +84,7 @@ class RepositoryIngestor:
                 path=relative_path,
                 size_bytes=size_bytes,
                 extension=path.suffix.lower(),
+                is_binary=False,
                 skipped_reason="file exceeds max_file_bytes",
             )
 
@@ -93,6 +94,7 @@ class RepositoryIngestor:
                 path=relative_path,
                 size_bytes=size_bytes,
                 extension=path.suffix.lower(),
+                is_binary=True,
                 skipped_reason="binary file",
             )
 
@@ -103,6 +105,7 @@ class RepositoryIngestor:
                 path=relative_path,
                 size_bytes=size_bytes,
                 extension=path.suffix.lower(),
+                is_binary=False,
                 skipped_reason="non-utf8 text",
             )
 
@@ -127,4 +130,3 @@ def _is_public_github_https_url(target: str) -> bool:
         return False
     parts = [part for part in parsed.path.split("/") if part]
     return len(parts) >= 2
-

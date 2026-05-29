@@ -3,20 +3,34 @@ from __future__ import annotations
 from startup_risk.ingest.repository import RepositoryIngestor
 
 
-def test_ingestor_reads_text_files_without_executing(tmp_path):
+def test_ingestor_reads_text_files_in_deterministic_repo_relative_order(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "README.md").write_text("# Demo\n", encoding="utf-8")
-    (repo / "script.py").write_text("print('do not run')\n", encoding="utf-8")
+    (repo / "b.py").write_text("print('do not run')\n", encoding="utf-8")
+    (repo / "a.py").write_text("value = 1\n", encoding="utf-8")
 
     snapshot = RepositoryIngestor().ingest(str(repo))
 
     assert snapshot.source.kind == "local"
-    assert [file.path for file in snapshot.files] == ["README.md", "script.py"]
-    assert snapshot.files[1].text == "print('do not run')\n"
+    assert [file.path for file in snapshot.files] == ["a.py", "b.py"]
+    assert snapshot.files[0].text == "value = 1\n"
+    assert all(not file.path.startswith("/") for file in snapshot.files)
 
 
-def test_ingestor_skips_binary_files(tmp_path):
+def test_ingestor_ignores_configured_directories(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# Demo\n", encoding="utf-8")
+    ignored = repo / "node_modules"
+    ignored.mkdir()
+    (ignored / "package.json").write_text("{}", encoding="utf-8")
+
+    snapshot = RepositoryIngestor().ingest(str(repo))
+
+    assert [file.path for file in snapshot.files] == ["README.md"]
+
+
+def test_ingestor_marks_binary_files(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "image.bin").write_bytes(b"\x00\x01\x02")
@@ -25,5 +39,18 @@ def test_ingestor_skips_binary_files(tmp_path):
 
     assert snapshot.files[0].path == "image.bin"
     assert snapshot.files[0].text is None
+    assert snapshot.files[0].is_binary is True
     assert snapshot.files[0].skipped_reason == "binary file"
 
+
+def test_ingestor_marks_oversized_files(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "large.txt").write_text("abcdef", encoding="utf-8")
+
+    snapshot = RepositoryIngestor(max_file_bytes=3).ingest(str(repo))
+
+    assert snapshot.files[0].path == "large.txt"
+    assert snapshot.files[0].text is None
+    assert snapshot.files[0].is_binary is False
+    assert snapshot.files[0].skipped_reason == "file exceeds max_file_bytes"

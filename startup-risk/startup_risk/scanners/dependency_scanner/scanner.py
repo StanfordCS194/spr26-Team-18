@@ -17,7 +17,7 @@ MAX_EVIDENCE_EXCERPT_CHARS = 500
 
 LOCKFILES_BY_ECOSYSTEM = {
     "npm": {"package-lock.json", "pnpm-lock.yaml", "yarn.lock"},
-    "python": {"poetry.lock", "pipfile.lock"},
+    "python": {"poetry.lock", "pipfile.lock", "uv.lock"},
     "rust": {"cargo.lock"},
 }
 
@@ -43,6 +43,9 @@ class DependencyRiskScanner:
     name = "Dependency Risk"
     version = SCANNER_VERSION
 
+    def __init__(self, *, verbose: bool = False) -> None:
+        self.verbose = verbose
+
     def scan(self, snapshot: RepositorySnapshot) -> list[Finding]:
         parsed = parse_repository_dependencies(snapshot)
         dependencies = [
@@ -53,10 +56,13 @@ class DependencyRiskScanner:
         manifest_paths = {file.path for file in parsed.discovery.manifests}
         lockfile_index = _lockfile_index(manifest_paths)
         resolved_index = _resolved_lockfile_dependencies(dependencies)
+        missing_lockfile_groups = _missing_lockfile_groups(dependencies, lockfile_index)
 
         findings: list[Finding] = []
         for skipped in parsed.discovery.skipped:
             findings.append(_finding_for_skipped(skipped))
+        for manifest_path, manifest_dependencies in missing_lockfile_groups.items():
+            findings.append(_finding_for_missing_lockfile_group(manifest_path, manifest_dependencies))
 
         for dependency in dependencies:
             if dependency.source_type == "metadata":
@@ -65,7 +71,8 @@ class DependencyRiskScanner:
 
             if dependency.source_type == "manifest":
                 vendored_manifest = _is_vendored_manifest_context(dependency)
-                if not vendored_manifest and not has_lockfile_for_ecosystem(dependency, lockfile_index):
+                has_lockfile = has_lockfile_for_ecosystem(dependency, lockfile_index)
+                if self.verbose and not vendored_manifest and not has_lockfile:
                     findings.append(_finding_for_missing_lockfile(dependency))
                 if is_risky_source_spec(dependency):
                     findings.append(_finding_for_risky_source(dependency))
@@ -73,6 +80,7 @@ class DependencyRiskScanner:
                     not vendored_manifest
                     and is_unpinned_spec(dependency)
                     and _dependency_name_key(dependency) not in resolved_index
+                    and (has_lockfile or self.verbose or _is_highly_floating_spec(dependency))
                 ):
                     findings.append(_finding_for_unpinned_spec(dependency))
 
@@ -84,7 +92,9 @@ class DependencyRiskScanner:
             if dependency.relationship == "vendored" and not has_vendored_provenance_metadata(dependency):
                 findings.append(_finding_for_vendored_provenance_gap(dependency))
 
-        return _dedupe_findings(findings)
+        deduped = _dedupe_findings(findings)
+        summary = _finding_for_summary(deduped)
+        return [summary, *deduped] if summary else deduped
 
 
 def _findings_for_metadata_flags(dependency: Dependency) -> list[Finding]:
@@ -122,10 +132,7 @@ def is_unpinned_spec(dependency: Dependency) -> bool:
 
 
 def is_risky_source_spec(dependency: Dependency) -> bool:
-    spec = _dependency_spec(dependency).lower()
-    if any(pattern in spec for pattern in RISKY_SOURCE_PATTERNS):
-        return True
-    return bool(re.search(r"(^|[\s\"'])\.\.?/", spec))
+    return _source_spec_kind(dependency) is not None
 
 
 def has_lockfile_for_ecosystem(dependency: Dependency, lockfile_index: dict[str, set[str]]) -> bool:
@@ -133,6 +140,10 @@ def has_lockfile_for_ecosystem(dependency: Dependency, lockfile_index: dict[str,
     if not expected:
         return True
     directory = _directory(dependency.source_file)
+    if dependency.ecosystem == "rust":
+        return _has_lockfile_in_directory_or_ancestor(directory, lockfile_index, expected)
+    if dependency.ecosystem in {"npm", "python"} and _is_workspace_manifest_path(dependency.source_file):
+        return _has_lockfile_in_directory_or_ancestor(directory, lockfile_index, expected)
     return bool(lockfile_index.get(directory, set()) & expected)
 
 
@@ -187,6 +198,26 @@ def _is_vendored_manifest_context(dependency: Dependency) -> bool:
     return any(part in {"third_party", "vendor", "external", "deps"} for part in path_parts)
 
 
+def _missing_lockfile_groups(
+    dependencies: Iterable[Dependency], lockfile_index: dict[str, set[str]]
+) -> dict[str, list[Dependency]]:
+    groups: dict[str, list[Dependency]] = {}
+    for dependency in dependencies:
+        if dependency.source_type != "manifest":
+            continue
+        if _is_vendored_manifest_context(dependency):
+            continue
+        if has_lockfile_for_ecosystem(dependency, lockfile_index):
+            continue
+        groups.setdefault(dependency.source_file, []).append(dependency)
+    return groups
+
+
+def _is_workspace_manifest_path(path: str) -> bool:
+    parts = PurePosixPath(path).parts[:-1]
+    return any(part in {"apps", "packages", "libs", "workspaces"} for part in parts)
+
+
 def _finding_for_missing_lockfile(dependency: Dependency) -> Finding:
     expected = ", ".join(sorted(LOCKFILES_BY_ECOSYSTEM.get(dependency.ecosystem, set())))
     return _dependency_finding(
@@ -197,6 +228,32 @@ def _finding_for_missing_lockfile(dependency: Dependency) -> Finding:
         recommendation="Commit the ecosystem lockfile so dependency resolution is reproducible.",
         severity=_scoped_severity(dependency, runtime="medium", dev="low"),
         confidence="high",
+    )
+
+
+def _finding_for_missing_lockfile_group(manifest_path: str, dependencies: list[Dependency]) -> Finding:
+    ecosystem = dependencies[0].ecosystem if dependencies else "unknown"
+    expected = ", ".join(sorted(LOCKFILES_BY_ECOSYSTEM.get(ecosystem, set())))
+    runtime_count = sum(1 for dependency in dependencies if is_runtime_dependency(dependency))
+    dev_count = len(dependencies) - runtime_count
+    examples = ", ".join(dependency.name for dependency in dependencies[:8])
+    if len(dependencies) > 8:
+        examples += f", and {len(dependencies) - 8} more"
+    scope_text = f"{runtime_count} runtime and {dev_count} dev/test" if dev_count else f"{runtime_count} runtime"
+    return Finding(
+        id=stable_finding_id(SCANNER_ID, "missing_lockfile_manifest", manifest_path),
+        title=f"Dependency manifest has no matching lockfile: {manifest_path}",
+        description=(
+            f"{manifest_path} declares {scope_text} dependencies, but no matching {expected} was found. "
+            f"Examples: {examples}."
+        ),
+        category="dependency_supply_chain",
+        severity=_manifest_missing_lockfile_severity(dependencies),  # type: ignore[arg-type]
+        confidence="high",
+        evidence=_manifest_group_evidence(dependencies),
+        recommendation="Commit the ecosystem lockfile so dependency resolution is reproducible.",
+        scanner_id=SCANNER_ID,
+        scanner_version=SCANNER_VERSION,
     )
 
 
@@ -213,13 +270,22 @@ def _finding_for_unpinned_spec(dependency: Dependency) -> Finding:
 
 
 def _finding_for_risky_source(dependency: Dependency) -> Finding:
+    source_kind = _source_spec_kind(dependency) or "non_registry"
+    if source_kind == "local_path":
+        description = "The dependency declaration references a local file or path source outside normal registry resolution."
+        recommendation = "Use workspace metadata for local project dependencies or document why this local path is required."
+        severity = _scoped_severity(dependency, runtime="medium", dev="low")
+    else:
+        description = "The dependency declaration references a Git, URL, or non-registry package source."
+        recommendation = "Use a registry version or pin the external source to an immutable commit/artifact with review."
+        severity = _scoped_severity(dependency, runtime="high", dev="medium")
     return _dependency_finding(
         rule="risky_source_spec",
         dependency=dependency,
         title=f"Dependency uses a non-registry source for {dependency.name}",
-        description="The dependency declaration references a Git, URL, workspace, file, or local path source.",
-        recommendation="Use a registry version or pin the external source to an immutable commit/artifact with review.",
-        severity=_scoped_severity(dependency, runtime="high", dev="medium"),
+        description=description,
+        recommendation=recommendation,
+        severity=severity,
         confidence="high",
     )
 
@@ -278,6 +344,33 @@ def _finding_for_skipped(path_and_reason: str) -> Finding:
     )
 
 
+def _finding_for_summary(findings: list[Finding]) -> Finding | None:
+    counted = [finding for finding in findings if finding.scanner_id == SCANNER_ID and not finding.id.startswith(f"{SCANNER_ID}.summary")]
+    if not counted:
+        return None
+    rule_counts: dict[str, int] = {}
+    severity_counts: dict[str, int] = {}
+    for finding in counted:
+        parts = finding.id.split(".")
+        rule = parts[1] if len(parts) > 2 else "other"
+        rule_counts[rule] = rule_counts.get(rule, 0) + 1
+        severity_counts[finding.severity] = severity_counts.get(finding.severity, 0) + 1
+    rule_text = ", ".join(f"{rule}={count}" for rule, count in sorted(rule_counts.items()))
+    severity_text = ", ".join(f"{severity}={count}" for severity, count in sorted(severity_counts.items()))
+    return Finding(
+        id=stable_finding_id(SCANNER_ID, "summary", f"{rule_text}|{severity_text}"),
+        title="Dependency scanner summary",
+        description=f"Grouped dependency-risk summary: {rule_text}. Severity counts: {severity_text}.",
+        category="dependency_supply_chain",
+        severity="info",
+        confidence="high",
+        evidence=[FindingEvidence(description="Dependency scanner grouped summary.", excerpt=rule_text)],
+        recommendation="Review higher-severity dependency supply-chain findings first, then inspect low-severity hygiene gaps.",
+        scanner_id=SCANNER_ID,
+        scanner_version=SCANNER_VERSION,
+    )
+
+
 def _dependency_finding(
     *,
     rule: str,
@@ -314,6 +407,19 @@ def _finding_evidence(dependency: Dependency) -> list[FindingEvidence]:
     ]
 
 
+def _manifest_group_evidence(dependencies: list[Dependency]) -> list[FindingEvidence]:
+    evidence = []
+    for dependency in dependencies[:12]:
+        evidence.append(
+            FindingEvidence(
+                location=_location(dependency.source_file, dependency.source_line),
+                description=f"{dependency.name} dependency declaration.",
+                excerpt=_bounded_excerpt(_dependency_spec(dependency)),
+            )
+        )
+    return evidence
+
+
 def _evidence_from_dependency(evidence: LicenseEvidence) -> FindingEvidence:
     return FindingEvidence(
         location=_location(evidence.file, evidence.line),
@@ -348,8 +454,45 @@ def _looks_like_major_only(spec: str) -> bool:
     return bool(re.fullmatch(r"\d+", cleaned))
 
 
+def _is_highly_floating_spec(dependency: Dependency) -> bool:
+    spec = _dependency_spec(dependency).lower().strip()
+    version = (dependency.version or "").lower().strip()
+    if not version:
+        return True
+    if version in {"*", "latest", "x"} or spec in {"*", "latest", "x"}:
+        return True
+    if version.startswith(">="):
+        return True
+    if ">=" in spec and "," not in spec:
+        return True
+    return bool(re.search(r"(?:^|[\s\"':])>=\s*[^,<\s]+(?:$|[\s\"'}\]])", spec))
+
+
+def _source_spec_kind(dependency: Dependency) -> str | None:
+    spec = _dependency_spec(dependency).lower()
+    if spec.startswith("workspace:") or "workspace:" in spec:
+        return None
+    if any(pattern in spec for pattern in ("git+", "git://", "ssh://", "github:", "gitlab:", "bitbucket:")):
+        return "external"
+    if "http://" in spec or "https://" in spec:
+        return "external"
+    if any(pattern in spec for pattern in ("file:", "link:")):
+        return "local_path"
+    if re.search(r"(^|[\s\"'=])\.\.?/", spec):
+        return "local_path"
+    return None
+
+
 def _scoped_severity(dependency: Dependency, *, runtime: str, dev: str) -> str:
     return dev if is_dev_dependency(dependency) else runtime
+
+
+def _manifest_missing_lockfile_severity(dependencies: list[Dependency]) -> str:
+    if not any(is_runtime_dependency(dependency) for dependency in dependencies):
+        return "low"
+    if all("package_role:library" in dependency.flags for dependency in dependencies):
+        return "low"
+    return "medium"
 
 
 def _directory(path: str) -> str:
@@ -364,6 +507,19 @@ def _lockfile_index(paths: Iterable[str]) -> dict[str, set[str]]:
         directory = _directory(path)
         index.setdefault(directory, set()).add(filename)
     return index
+
+
+def _has_lockfile_in_directory_or_ancestor(
+    directory: str, lockfile_index: dict[str, set[str]], expected: set[str]
+) -> bool:
+    current = directory
+    while True:
+        if lockfile_index.get(current, set()) & expected:
+            return True
+        if current == "":
+            return False
+        parent = PurePosixPath(current).parent.as_posix()
+        current = "" if parent == "." else parent
 
 
 def _resolved_lockfile_dependencies(dependencies: Iterable[Dependency]) -> set[tuple[str, str]]:

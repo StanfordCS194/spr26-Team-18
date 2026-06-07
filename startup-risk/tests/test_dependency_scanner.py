@@ -46,7 +46,7 @@ def test_dependency_scanner_reuses_npm_python_and_rust_parsers():
     )
 
     findings = DependencyRiskScanner().scan(snap)
-    text = " ".join(finding.title for finding in findings)
+    text = " ".join(finding.title + " " + finding.description for finding in findings)
 
     assert "left-pad" in text
     assert "requests" in text
@@ -67,10 +67,11 @@ def test_runtime_manifest_without_lockfile_is_medium_and_dev_is_low():
 
     findings = DependencyRiskScanner().scan(snap)
 
-    runtime = [finding for finding in findings if "runtime-lib" in finding.title and "lockfile" in finding.id][0]
-    dev = [finding for finding in findings if "dev-lib" in finding.title and "lockfile" in finding.id][0]
-    assert runtime.severity == "medium"
-    assert dev.severity == "low"
+    finding = [finding for finding in findings if "matching lockfile" in finding.title][0]
+    assert finding.severity == "medium"
+    assert "1 runtime and 1 dev/test" in finding.description
+    assert "runtime-lib" in finding.description
+    assert "dev-lib" in finding.description
 
 
 def test_unpinned_specs_are_flagged_unless_lockfile_resolves_dependency():
@@ -124,7 +125,7 @@ def test_risky_source_spec_is_high_for_runtime_and_medium_for_dev():
     runtime = [finding for finding in findings if "runtime-lib" in finding.title and "non-registry" in finding.title][0]
     dev = [finding for finding in findings if "dev-lib" in finding.title and "non-registry" in finding.title][0]
     assert runtime.severity == "high"
-    assert dev.severity == "medium"
+    assert dev.severity == "low"
 
 
 def test_npm_lifecycle_script_is_reported_without_execution():
@@ -185,6 +186,97 @@ def test_vendored_package_metadata_does_not_require_local_lockfile_or_pinned_spe
 
     assert not any("lockfile" in finding.title for finding in findings)
     assert not any("not pinned" in finding.title for finding in findings)
+
+
+def test_missing_lockfile_is_grouped_and_range_specs_are_not_double_reported():
+    snap = snapshot(
+        {
+            "package.json": json.dumps(
+                {
+                    "name": "library",
+                    "dependencies": {"react": "^18.0.0", "debug": "~4.0.0"},
+                }
+            )
+        }
+    )
+
+    findings = DependencyRiskScanner().scan(snap)
+
+    missing = [finding for finding in findings if "matching lockfile" in finding.title]
+    assert len(missing) == 1
+    assert missing[0].severity == "low"
+    assert "react" in missing[0].description
+    assert not any("not pinned" in finding.title for finding in findings)
+
+
+def test_dependency_verbose_includes_dependency_level_missing_lockfile_details():
+    snap = snapshot({"package.json": '{"dependencies":{"react":"^18.0.0"}}\n'})
+
+    findings = DependencyRiskScanner(verbose=True).scan(snap)
+
+    assert any(finding.title == "Dependency manifest has no matching lockfile: package.json" for finding in findings)
+    assert any(finding.title == "Dependency manifest has no matching lockfile for react" for finding in findings)
+
+
+def test_rust_workspace_uses_root_lockfile_and_suppresses_local_path_dependencies():
+    snap = snapshot(
+        {
+            "Cargo.lock": '[[package]]\nname = "globset"\nversion = "0.4.0"\n',
+            "crates/globset/Cargo.toml": (
+                '[package]\nname = "globset"\nversion = "0.4.0"\n\n'
+                "[dependencies]\naho-corasick = \"1.1.1\"\n"
+            ),
+            "fuzz/Cargo.toml": (
+                '[package]\nname = "ripgrep-fuzz"\nversion = "0.1.0"\n\n'
+                '[dependencies]\nglobset = { path = "../crates/globset" }\n'
+            ),
+        }
+    )
+
+    findings = DependencyRiskScanner().scan(snap)
+
+    assert not any("matching lockfile" in finding.title for finding in findings)
+    assert not any("globset" in finding.title and "non-registry" in finding.title for finding in findings)
+
+
+def test_npm_workspace_uses_root_lockfile_for_package_manifests():
+    snap = snapshot(
+        {
+            "package-lock.json": json.dumps(
+                {
+                    "packages": {
+                        "node_modules/react": {
+                            "version": "18.2.0",
+                            "resolved": "https://registry.npmjs.org/react/-/react-18.2.0.tgz",
+                            "integrity": "sha512-demo",
+                        }
+                    }
+                }
+            ),
+            "packages/web/package.json": '{"dependencies":{"react":"^18.0.0"}}\n',
+        }
+    )
+
+    findings = DependencyRiskScanner().scan(snap)
+
+    assert not any("matching lockfile" in finding.title for finding in findings)
+
+
+def test_additional_lockfile_formats_resolve_manifest_specs():
+    snap = snapshot(
+        {
+            "package.json": '{"dependencies":{"left-pad":"^1.0.0"}}\n',
+            "yarn.lock": 'left-pad@^1.0.0:\n  version "1.3.0"\n  resolved "https://registry.yarnpkg.com/left-pad/-/left-pad-1.3.0.tgz"\n  integrity sha512-demo\n',
+            "pyproject.toml": '[project]\ndependencies = ["requests>=2"]\n',
+            "uv.lock": '[[package]]\nname = "requests"\nversion = "2.31.0"\n',
+        }
+    )
+
+    findings = DependencyRiskScanner().scan(snap)
+
+    assert not any("left-pad" in finding.title and "not pinned" in finding.title for finding in findings)
+    assert not any("requests" in finding.title and "not pinned" in finding.title for finding in findings)
+    assert not any("matching lockfile" in finding.title for finding in findings)
 
 
 def test_vendored_provenance_gap_ignores_metadata_only_and_flags_substantive_code():

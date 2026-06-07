@@ -97,6 +97,10 @@ def scan(
         bool,
         typer.Option("--dependency-only", help="Run only the dependency supply-chain scanner."),
     ] = False,
+    dependency_verbose: Annotated[
+        bool,
+        typer.Option("--dependency-verbose", help="Include verbose dependency-level hygiene findings."),
+    ] = False,
 ) -> None:
     """Scan a repository using static parsing only."""
     console = Console()
@@ -104,7 +108,7 @@ def scan(
         raise typer.BadParameter("--license-only and --dependency-only cannot be used together.")
     ingestor = RepositoryIngestor(max_file_bytes=max_file_bytes)
     if dependency_only:
-        scanners = [DependencyRiskScanner()]
+        scanners = [DependencyRiskScanner(verbose=dependency_verbose)]
     elif license_only:
         scanners = [
             LicenseRiskScanner(

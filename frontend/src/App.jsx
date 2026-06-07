@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import HomePage from "./components/HomePage";
+import RepoScanner from "./components/RepoScanner";
 import StartupGrader from "./components/StartupGrader";
 import ActiveRecommendations from "./components/ActiveRecommendations";
 import LegalIntelligence from "./components/LegalIntelligence";
 import FinancialCompliance from "./components/FinancialCompliance";
 
-const TAB_IDS = ["home", "startup", "legal", "recs", "financial"];
+const TAB_IDS = ["home", "scanner", "startup", "legal", "recs", "financial"];
 
 function tabFromHash() {
   const h = (typeof window !== "undefined" ? window.location.hash : "").slice(1);
@@ -36,6 +37,7 @@ export default function App() {
       <main className="ml-64 px-10 pb-20 pt-10">
         <div className="mx-auto max-w-[1080px] animate-fade-in" key={activeTab}>
           {activeTab === "home" && <HomePage onTabChange={changeTab} />}
+          {activeTab === "scanner" && <RepoScanner />}
           {activeTab === "startup" && (
             <StartupGrader onRecommendationsUpdated={setStartupRecommendations} />
           )}

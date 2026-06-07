@@ -3,6 +3,7 @@ from __future__ import annotations
 from startup_risk.scanners.base import InventoryScanner, Scanner
 from startup_risk.scanners.code_compliance_scanner import CodeComplianceScanner
 from startup_risk.scanners.license_scanner import LicenseRiskScanner
+from startup_risk.scanners.outdated_deps_scanner import OutdatedDepsScanner
 from startup_risk.scanners.repo_inventory import RepoInventoryScanner
 from startup_risk.scanners.secret_scanner import SecretScanner
 from startup_risk.scanners.static_hygiene import StaticHygieneScanner

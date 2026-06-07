@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight, Scale, Sparkles, Gauge, MessageCircle,
-  Upload, CheckCircle2, DollarSign, FileText,
-  ShieldAlert, FlaskConical,
+  Upload, CheckCircle2, DollarSign, FileText, ShieldAlert, Github,
 } from "lucide-react";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -38,24 +37,24 @@ function useCountUp(target, duration = 1800, delay = 0) {
 const STEPS = [
   {
     n: "01",
-    Icon: ShieldAlert,
-    title: "Scan your repo",
-    body: "Paste a public GitHub URL. Pick your industry. Our scanners run in under 30 seconds — no account or install needed.",
-    tags: ["GitHub URL", "8 industry verticals", "Evidence-backed"],
+    Icon: Github,
+    title: "Paste a GitHub URL",
+    body: "Link any public repository. No account, no install, no code execution — we read only.",
+    tags: ["Public repos", "No OAuth", "Static analysis only"],
   },
   {
     n: "02",
-    Icon: Sparkles,
-    title: "Get graded instantly",
-    body: "50+ deterministic rules across 5 axes: Engineering, Legal, Financial, Compliance, and Product.",
-    tags: ["Letter grade", "5 axes", "50+ rules"],
+    Icon: ShieldAlert,
+    title: "Tell us your industry",
+    body: "We load the right scanners for your domain — HIPAA for health, PCI for fintech, OSS license rules for dev tools.",
+    tags: ["Health", "Fintech", "SaaS", "AI/ML", "EdTech"],
   },
   {
     n: "03",
-    Icon: DollarSign,
-    title: "Save real money",
-    body: "See the exact legal fees a compliance attorney would charge — and your top 5 actions to raise your grade this week.",
-    tags: ["Legal savings", "Action plan", "State-adjusted rates"],
+    Icon: CheckCircle2,
+    title: "Get evidence-backed findings",
+    body: "Every finding points to a specific file and line. Severity and confidence are always listed separately.",
+    tags: ["File + line evidence", "Severity", "Confidence"],
   },
 ];
 
@@ -64,19 +63,10 @@ const FEATURES = [
     id: "scanner",
     Icon: ShieldAlert,
     title: "Repo Risk Scanner",
-    body: "Paste any public GitHub URL. We run industry-specific static analysis scanners and surface evidence-backed findings with file and line numbers.",
+    body: "Paste a GitHub URL, pick your industry, and get evidence-backed findings across licenses, privacy, supply chain, and more.",
     cta: "Scan a repository",
     accent: "text-rose-500",
     bg: "bg-rose-50",
-  },
-  {
-    id: "benchmark",
-    Icon: FlaskConical,
-    title: "Advisory Benchmark",
-    body: "See how our scanner compares against the GitHub Advisory Database — how many days before an advisory was filed we already flagged the risk.",
-    cta: "View benchmark",
-    accent: "text-accent-gold",
-    bg: "bg-accent-gold/20",
   },
   {
     id: "startup",
@@ -93,8 +83,17 @@ const FEATURES = [
     title: "Legal Cost Savings",
     body: "Line-item breakdown of what a compliance attorney would invoice. Rates matched to your industry and state. Sources cited.",
     cta: "Calculate savings",
-    accent: "text-status-chaptered-text",
-    bg: "bg-status-chaptered-bg",
+    accent: "text-accent-gold",
+    bg: "bg-accent-gold/20",
+  },
+  {
+    id: "financial",
+    Icon: Gauge,
+    title: "Financial Compliance",
+    body: "Runway forecasting, transaction categorization from Mercury/Stripe/Gusto, R&D tax credit estimation, and filing tracker.",
+    cta: "View financials",
+    accent: "text-status-committee-text",
+    bg: "bg-status-committee-bg",
   },
 ];
 
@@ -112,7 +111,7 @@ export default function HomePage({ onTabChange }) {
       <section className="space-y-8 pt-4">
         <div className="animate-slide-up flex items-center gap-2 text-text-secondary" style={{ animationDelay: "0s" }}>
           <ShieldAlert className="h-4 w-4 text-accent-gold" strokeWidth={2.4} />
-          <span className="text-[12px] uppercase tracking-[0.18em]">Startup Risk Scanner · Compliance Intelligence</span>
+          <span className="text-[12px] uppercase tracking-[0.18em]">Startup Risk Intelligence · Static Analysis + LLMs</span>
         </div>
 
         <div className="animate-slide-up max-w-[680px] space-y-4" style={{ animationDelay: "0.06s" }}>
@@ -120,35 +119,32 @@ export default function HomePage({ onTabChange }) {
             Find compliance debt before it gets expensive.
           </h1>
           <p className="text-[17px] leading-relaxed text-text-secondary">
-            Scan any public GitHub repo for security and compliance risks in under 30 seconds.
-            Evidence-backed findings with file and line number — not generic advice.
+            Paste a public GitHub URL. We compare what your code actually does against
+            industry-specific risk patterns — licenses, privacy, supply chain, and more.
           </p>
         </div>
 
-        {/* Benchmark highlight card */}
+        {/* Scanner hero card */}
         <div
           className="animate-slide-up inline-flex flex-col rounded-3xl border border-accent-gold/40 bg-accent-gold/10 px-8 py-6 shadow-card"
           style={{ animationDelay: "0.12s" }}
         >
           <div className="text-[11px] uppercase tracking-wider text-text-muted">
-            Avg. days before GitHub Advisory was filed
+            What we scan for
           </div>
-          <div className="mt-2 flex items-baseline gap-3">
-            <span className="text-[56px] font-bold tabular-nums leading-none text-accent-gold">
-              {daysEarly}d
-            </span>
-            <span className="text-[16px] text-text-muted">earlier than disclosure</span>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {["License risk", "Privacy gaps", "Supply chain", "PII in logs", "Missing security files", "AI data use", "HIPAA triggers", "OSS obligations"].map((tag) => (
+              <span key={tag} className="rounded-full border border-accent-gold/30 bg-white/50 px-3 py-1 text-[12px] text-text-secondary">
+                {tag}
+              </span>
+            ))}
           </div>
-          <div className="mt-2 flex items-center gap-4 text-[12px] text-text-secondary">
-            <span>
-              <span className="font-semibold text-text-primary">{reposScanned}</span> repos benchmarked
-            </span>
+          <div className="mt-4 flex items-center gap-4 text-[12px] text-text-secondary">
+            <span><span className="font-semibold text-text-primary">4</span> scanners running</span>
             <span className="text-text-muted">·</span>
-            <span>
-              <span className="font-semibold text-text-primary">{findingsTotal}</span> total findings
-            </span>
+            <span><span className="font-semibold text-text-primary">8</span> industry verticals</span>
             <span className="text-text-muted">·</span>
-            <span>Static analysis only</span>
+            <span>Evidence-backed findings</span>
           </div>
         </div>
 
@@ -158,15 +154,16 @@ export default function HomePage({ onTabChange }) {
             onClick={() => onTabChange("scanner")}
             className="flex items-center gap-2 rounded-xl bg-action-dark px-6 py-2.5 text-[14px] font-semibold text-text-invert transition-opacity hover:opacity-90"
           >
-            <ShieldAlert className="h-4 w-4" strokeWidth={2.4} />
+            <Github className="h-4 w-4" strokeWidth={2} />
             Scan a repository
+            <ArrowRight className="h-4 w-4" strokeWidth={2.4} />
           </button>
           <button
-            onClick={() => onTabChange("benchmark")}
+            onClick={() => onTabChange("startup")}
             className="flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-2.5 text-[14px] font-medium text-text-primary shadow-card transition-all hover:shadow-card-hover"
           >
-            <FlaskConical className="h-4 w-4 text-accent-gold" strokeWidth={2} />
-            View benchmark results
+            <Sparkles className="h-4 w-4 text-accent-gold" strokeWidth={2} />
+            Startup health grade
           </button>
         </div>
       </section>
@@ -263,9 +260,9 @@ export default function HomePage({ onTabChange }) {
         style={{ animationDelay: "0.2s" }}
       >
         {[
-          { value: "4+ scanners",        label: "per industry vertical" },
-          { value: "8 verticals",        label: "health, fintech, saas, AI & more" },
-          { value: "Evidence backed",    label: "file + line number per finding" },
+          { value: "4+",       label: "scanners per repo" },
+          { value: "8",        label: "industry verticals covered" },
+          { value: "Evidence", label: "backed — file + line number" },
         ].map(({ value, label }) => (
           <div
             key={label}

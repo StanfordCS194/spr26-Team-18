@@ -92,6 +92,10 @@ def scan(
         bool,
         typer.Option("--license-only", help="Run only the license scanner, excluding repository hygiene findings."),
     ] = False,
+    vuln_osv: Annotated[
+        bool,
+        typer.Option("--vuln-osv", help="Query the OSV vulnerability database for known CVEs in pinned dependencies."),
+    ] = False,
 ) -> None:
     """Scan a repository using static parsing only."""
     console = Console()
@@ -123,6 +127,7 @@ def scan(
             license_registry_metadata=license_registry_metadata,
             license_artifact_inspection=license_artifact_inspection,
             license_source_repo=license_source_repo,
+            vuln_osv=vuln_osv,
         )
     )
     engine = ScanEngine(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from startup_risk.scanners.base import InventoryScanner, Scanner
 from startup_risk.scanners.license_scanner import LicenseRiskScanner
+from startup_risk.scanners.outdated_deps_scanner import OutdatedDepsScanner
 from startup_risk.scanners.repo_inventory import RepoInventoryScanner
 from startup_risk.scanners.static_hygiene import StaticHygieneScanner
 
@@ -18,6 +19,8 @@ def default_scanners(
     license_registry_metadata: bool = False,
     license_artifact_inspection: bool = False,
     license_source_repo: bool = False,
+    outdated_registry: bool = False,
+    outdated_max_per_ecosystem: int = 30,
 ) -> list[Scanner]:
     return [
         StaticHygieneScanner(),
@@ -32,6 +35,10 @@ def default_scanners(
             enable_registry_metadata=license_registry_metadata,
             enable_artifact_inspection=license_artifact_inspection,
             enable_source_repo=license_source_repo,
+        ),
+        OutdatedDepsScanner(
+            enable_registry=outdated_registry,
+            max_per_ecosystem=outdated_max_per_ecosystem,
         ),
     ]
 

@@ -1,8 +1,9 @@
-import { Home, Scale, Sparkles, MessageCircle, Gauge } from "lucide-react";
+import { Home, Scale, Sparkles, MessageCircle, Gauge, ShieldAlert } from "lucide-react";
 import logo from "../assets/logo.png";
 
 const TABS = [
   { id: "home",    label: "Home",           Icon: Home },
+  { id: "scanner", label: "Repo Scanner",   Icon: ShieldAlert },
   { id: "startup", label: "Startup Health", Icon: Sparkles },
   { id: "legal",   label: "Legal",          Icon: Scale },
   { id: "recs",    label: "Recommendations", Icon: MessageCircle },
@@ -47,9 +48,9 @@ export default function Sidebar({ activeTab, onTabChange }) {
       </nav>
 
       <div className="px-6 pb-6 pt-4 text-[11px] leading-relaxed text-text-muted">
-        California environmental legislation
+        Startup risk &amp; compliance intelligence.
         <br />
-        for mid-market companies.
+        Powered by static analysis + LLMs.
       </div>
     </aside>
   );

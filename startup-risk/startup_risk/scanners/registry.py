@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from startup_risk.scanners.base import InventoryScanner, Scanner
 from startup_risk.scanners.code_compliance_scanner import CodeComplianceScanner
+from startup_risk.scanners.dependency_vuln_scanner import DependencyVulnScanner
 from startup_risk.scanners.license_scanner import LicenseRiskScanner
 from startup_risk.scanners.outdated_deps_scanner import OutdatedDepsScanner
 from startup_risk.scanners.repo_inventory import RepoInventoryScanner
@@ -39,6 +40,8 @@ def default_scanners(
             enable_source_repo=license_source_repo,
         ),
         DependencyVulnScanner(enable_osv=vuln_osv),
+        OutdatedDepsScanner(),
+        CodeComplianceScanner(),
     ]
 
 

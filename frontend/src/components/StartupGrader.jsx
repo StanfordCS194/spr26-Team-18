@@ -235,6 +235,11 @@ export default function StartupGrader({ onRecommendationsUpdated }) {
               `✓ Repo compliance scan · ${features.github.highComplianceFindingCount || 0} high · ${features.github.mediumComplianceFindingCount || 0} medium findings`
             );
           }
+          if (features.github.licenseScanState === "ok") {
+            pushLog(
+              `✓ Dependency license scan · ${features.github.highLicenseFindingCount || 0} high · ${features.github.mediumLicenseFindingCount || 0} medium findings`
+            );
+          }
         }
         if (prdFile) {
           pushLog(`Reading PRD · ${prdFile.name}`);

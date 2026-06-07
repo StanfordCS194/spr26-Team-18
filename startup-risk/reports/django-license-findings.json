@@ -1,0 +1,327 @@
+[
+  {
+    "findings": [
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "tzdata; sys_platform == 'win32'",
+            "location": {
+              "line_end": 12,
+              "line_start": 12,
+              "path": "pyproject.toml"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.043c1aecd018",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "medium",
+        "title": "Resolve unknown license for tzdata"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "Sphinx>=4.5.0",
+            "location": {
+              "line_end": 2,
+              "line_start": 2,
+              "path": "docs/requirements.txt"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.05b2d4b7ef76",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "low",
+        "title": "Resolve unknown license for Sphinx@4.5.0"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "devDependencies: grunt-contrib-qunit@^10.2.0",
+            "location": {
+              "line_end": 15,
+              "line_start": 15,
+              "path": "package.json"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.15f302154e94",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "low",
+        "title": "Resolve unknown license for grunt-contrib-qunit@^10.2.0"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "devDependencies: grunt-cli@^1.5.0",
+            "location": {
+              "line_end": 14,
+              "line_start": 14,
+              "path": "package.json"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.2ec4a9e4e790",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "low",
+        "title": "Resolve unknown license for grunt-cli@^1.5.0"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "sphinxcontrib-spelling",
+            "location": {
+              "line_end": 3,
+              "line_start": 3,
+              "path": "docs/requirements.txt"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.336bb7827e1d",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "low",
+        "title": "Resolve unknown license for sphinxcontrib-spelling"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "devDependencies: @biomejs/biome@2.4.15",
+            "location": {
+              "line_end": 12,
+              "line_start": 12,
+              "path": "package.json"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.3622591a4303",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "low",
+        "title": "Resolve unknown license for @biomejs/biome@2.4.15"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "blacken-docs",
+            "location": {
+              "line_end": 4,
+              "line_start": 4,
+              "path": "docs/requirements.txt"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.370ea8618c29",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "low",
+        "title": "Resolve unknown license for blacken-docs"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "asgiref>=3.9.1",
+            "location": {
+              "line_end": 10,
+              "line_start": 10,
+              "path": "pyproject.toml"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.4bf44ab62cd1",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "medium",
+        "title": "Resolve unknown license for asgiref@3.9.1"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "devDependencies: qunit@^2.25.0",
+            "location": {
+              "line_end": 16,
+              "line_start": 16,
+              "path": "package.json"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.82869bd1951e",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "low",
+        "title": "Resolve unknown license for qunit@^2.25.0"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "sqlparse>=0.5.0",
+            "location": {
+              "line_end": 11,
+              "line_start": 11,
+              "path": "pyproject.toml"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.869108e197ce",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "medium",
+        "title": "Resolve unknown license for sqlparse@0.5.0"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "pyenchant",
+            "location": {
+              "line_end": 1,
+              "line_start": 1,
+              "path": "docs/requirements.txt"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.a113e51ac3bc",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "low",
+        "title": "Resolve unknown license for pyenchant"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "sphinx-lint",
+            "location": {
+              "line_end": 5,
+              "line_start": 5,
+              "path": "docs/requirements.txt"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.f04ca245c689",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "low",
+        "title": "Resolve unknown license for sphinx-lint"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "devDependencies: grunt@^1.6.2",
+            "location": {
+              "line_end": 13,
+              "line_start": 13,
+              "path": "package.json"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.fa2aa620e361",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "low",
+        "title": "Resolve unknown license for grunt@^1.6.2"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "A vendored component was detected without a LICENSE, COPYING, or NOTICE file.",
+        "evidence": [
+          {
+            "description": "local_license_file evidence did not establish a license.",
+            "excerpt": "Vendored component has no detected LICENSE/COPYING/NOTICE file.",
+            "location": {
+              "line_end": null,
+              "line_start": null,
+              "path": "tests/staticfiles_tests/apps/test/static/test/vendor/module.js"
+            }
+          }
+        ],
+        "id": "license_risk.vendored_missing_license.67381544ae93",
+        "recommendation": "Identify the upstream project and add license evidence before production use.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "low",
+        "title": "Vendored code has no clear license file"
+      }
+    ],
+    "repository": {
+      "deterministic_only": true,
+      "expected_dependency_files": [
+        "pyproject.toml"
+      ],
+      "files": 7063,
+      "findings": 14,
+      "high": 0,
+      "low": 11,
+      "medium": 3,
+      "slug": "django/django",
+      "suite": "starter"
+    }
+  }
+]

@@ -39,6 +39,29 @@ function repoFindingLocations(findings = [], limit = 5) {
   }));
 }
 
+function licenseFindingSummary(findings = []) {
+  if (!findings.length) return "no third-party dependency license findings";
+  const high = findings.filter((f) => f.severity === "high").length;
+  const medium = findings.filter((f) => f.severity === "medium").length;
+  const low = findings.filter((f) => f.severity === "low").length;
+  return `${high} high, ${medium} medium, ${low} low license findings`;
+}
+
+function licenseFindingLocations(findings = [], limit = 5) {
+  return findings.slice(0, limit).map((finding) => {
+    const evidence = (finding.evidence || []).find((item) => item.location) || (finding.evidence || [])[0] || {};
+    const location = evidence.location || {};
+    return {
+      path: location.path || "-",
+      line: location.line_start || null,
+      snippet: evidence.excerpt || evidence.description || finding.description,
+      title: finding.title,
+      recommendation: finding.recommendation,
+      severity: finding.severity,
+    };
+  });
+}
+
 // ---- Rules ----
 // Every rule returns { passed: bool, observed?: string }
 // `observed` shows up in the drill-down so the user sees WHAT we found.
@@ -159,6 +182,23 @@ export const RULES = [
     },
     fix: "AGPL/GPL/SSPL contaminate proprietary SaaS. Switch to MIT/Apache-2.0 or wall this off.",
     dollarImpact: 100000,
+  },
+  {
+    id: "legal_dependency_license_risk",
+    axis: "legal",
+    title: "Third-party dependency licenses are reviewable",
+    weight: 18,
+    check: (f) => {
+      const findings = f.github?.licenseFindings || [];
+      const actionable = findings.filter((finding) => ["high", "medium"].includes(finding.severity));
+      return {
+        passed: actionable.length === 0,
+        observed: f.github ? licenseFindingSummary(findings) : "no GitHub repo scanned",
+        locations: licenseFindingLocations(actionable.length ? actionable : findings),
+      };
+    },
+    fix: "Resolve unknown or high-risk third-party dependency licenses before production use.",
+    dollarImpact: 50000,
   },
   {
     id: "legal_tos",
@@ -602,7 +642,7 @@ function requiredInputForRule(rule) {
   if (rule.axis === "engineering") return "github";
   if (rule.axis === "financial") return "spreadsheet";
   if (rule.axis === "product") return "prd";
-  if (rule.id === "legal_license_safe") return "github";
+  if (["legal_license_safe", "legal_dependency_license_risk"].includes(rule.id)) return "github";
   if (rule.axis === "legal") return "prd";
   if (rule.id.startsWith("comp_repo_")) return "github";
   if (rule.axis === "compliance") return "prd";

@@ -1,0 +1,144 @@
+[
+  {
+    "findings": [
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "click>=8.1",
+            "location": {
+              "line_end": 7,
+              "line_start": 7,
+              "path": "examples/aliases/pyproject.toml"
+            }
+          },
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "click>=8.1",
+            "location": {
+              "line_end": 7,
+              "line_start": 7,
+              "path": "examples/colors/pyproject.toml"
+            }
+          },
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "click>=8.1",
+            "location": {
+              "line_end": 7,
+              "line_start": 7,
+              "path": "examples/completion/pyproject.toml"
+            }
+          },
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "click>=8.1",
+            "location": {
+              "line_end": 7,
+              "line_start": 7,
+              "path": "examples/complex/pyproject.toml"
+            }
+          },
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "click>=8.1",
+            "location": {
+              "line_end": 7,
+              "line_start": 7,
+              "path": "examples/imagepipe/pyproject.toml"
+            }
+          },
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "click>=8.1",
+            "location": {
+              "line_end": 7,
+              "line_start": 7,
+              "path": "examples/inout/pyproject.toml"
+            }
+          },
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "click>=8.1",
+            "location": {
+              "line_end": 7,
+              "line_start": 7,
+              "path": "examples/naval/pyproject.toml"
+            }
+          },
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "click>=8.1",
+            "location": {
+              "line_end": 7,
+              "line_start": 7,
+              "path": "examples/repo/pyproject.toml"
+            }
+          },
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "click>=8.1",
+            "location": {
+              "line_end": 7,
+              "line_start": 7,
+              "path": "examples/termui/pyproject.toml"
+            }
+          },
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "click>=8.1",
+            "location": {
+              "line_end": 7,
+              "line_start": 7,
+              "path": "examples/validation/pyproject.toml"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.6d116994ec2d",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "low",
+        "title": "Resolve unknown license for click@8.1"
+      },
+      {
+        "category": "license_risk",
+        "confidence": "medium",
+        "description": "The scanner did not establish a license for this dependency from the available local evidence.",
+        "evidence": [
+          {
+            "description": "local_manifest evidence did not establish a license.",
+            "excerpt": "pillow",
+            "location": {
+              "line_end": 8,
+              "line_start": 8,
+              "path": "examples/imagepipe/pyproject.toml"
+            }
+          }
+        ],
+        "id": "license_risk.unknown_license.9f21212999ac",
+        "recommendation": "Resolve via package registry metadata, package artifact inspection, or manual review. Run with registry/artifact/LLM enrichment before treating this as confirmed risk.",
+        "scanner_id": "license_risk",
+        "scanner_version": "1.0.0",
+        "severity": "low",
+        "title": "Resolve unknown license for pillow"
+      }
+    ],
+    "repository": {
+      "deterministic_only": true,
+      "expected_dependency_files": [
+        "pyproject.toml"
+      ],
+      "files": 150,
+      "findings": 2,
+      "high": 0,
+      "low": 2,
+      "medium": 0,
+      "slug": "pallets/click",
+      "suite": "starter"
+    }
+  }
+]

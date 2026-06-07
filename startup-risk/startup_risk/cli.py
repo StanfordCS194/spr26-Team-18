@@ -19,6 +19,11 @@ class OutputFormat(str, Enum):
     text = "text"
 
 
+class LicenseLLMProvider(str, Enum):
+    openai = "openai"
+    anthropic = "anthropic"
+
+
 app = typer.Typer(
     name="startup-risk",
     help="Static startup repository risk scanner.",
@@ -42,11 +47,50 @@ def scan(
         int,
         typer.Option(help="Maximum bytes to read from an individual text file."),
     ] = 256_000,
+    license_llm_provider: Annotated[
+        LicenseLLMProvider | None,
+        typer.Option("--license-llm-provider", help="Batch LLM provider for license scanning."),
+    ] = None,
+    license_batch_timeout_hours: Annotated[
+        float,
+        typer.Option("--license-batch-timeout-hours", help="Maximum hours to block waiting for license LLM batch output."),
+    ] = 24,
+    license_poll_interval_seconds: Annotated[
+        int,
+        typer.Option("--license-poll-interval-seconds", help="Seconds between license batch status polls."),
+    ] = 60,
+    license_llm_prompt_token_budget: Annotated[
+        int,
+        typer.Option("--license-llm-prompt-token-budget", help="Maximum estimated prompt tokens to enqueue for license batch work."),
+    ] = 200_000,
+    license_llm_max_batch_requests: Annotated[
+        int,
+        typer.Option("--license-llm-max-batch-requests", help="Maximum requests in one license scanner batch."),
+    ] = 50_000,
+    license_llm_max_batch_file_bytes: Annotated[
+        int,
+        typer.Option("--license-llm-max-batch-file-bytes", help="Maximum license scanner batch input JSONL bytes."),
+    ] = 200_000_000,
+    deterministic_only: Annotated[
+        bool,
+        typer.Option("--deterministic-only", help="Skip mandatory batch LLM review for local debugging/tests."),
+    ] = False,
 ) -> None:
     """Scan a repository using static parsing only."""
     console = Console()
     ingestor = RepositoryIngestor(max_file_bytes=max_file_bytes)
-    engine = ScanEngine(ingestor=ingestor, scanners=default_scanners())
+    engine = ScanEngine(
+        ingestor=ingestor,
+        scanners=default_scanners(
+            deterministic_license_only=deterministic_only,
+            license_llm_provider=license_llm_provider.value if license_llm_provider else None,
+            license_batch_timeout_seconds=int(license_batch_timeout_hours * 60 * 60),
+            license_poll_interval_seconds=license_poll_interval_seconds,
+            license_llm_prompt_token_budget=license_llm_prompt_token_budget,
+            license_llm_max_batch_requests=license_llm_max_batch_requests,
+            license_llm_max_batch_file_bytes=license_llm_max_batch_file_bytes,
+        ),
+    )
 
     try:
         result = engine.scan(target)

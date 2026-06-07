@@ -100,9 +100,9 @@ const FEATURES = [
 // ── component ─────────────────────────────────────────────────────────────────
 
 export default function HomePage({ onTabChange }) {
-  const savings  = useCountUp(47_000, 2000, 300);
-  const bills    = useCountUp(4_821,  1600, 500);
-  const hours    = useCountUp(350,    1400, 400);
+  const reposScanned  = useCountUp(12,  2000, 300);
+  const findingsTotal = useCountUp(87,  1600, 500);
+  const daysEarly     = useCountUp(75,  1400, 400);
 
   return (
     <div className="space-y-20 pb-4">

@@ -37,3 +37,23 @@ def test_cli_license_scan_requires_batch_llm_key_by_default(tmp_path, monkeypatc
 
     assert result.exit_code != 0
     assert "OPENAI_API_KEY is required" in result.output
+
+
+def test_cli_license_only_excludes_static_hygiene_findings(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".env").write_text("SECRET_KEY=demo\n", encoding="utf-8")
+    (repo / "package-lock.json").write_text(
+        json.dumps({"packages": {"node_modules/copyleft": {"version": "1.0.0", "license": "GPL-3.0"}}}),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["scan", str(repo), "--format", "json", "--deterministic-only", "--license-only"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["findings"]
+    assert {finding["scanner_id"] for finding in payload["findings"]} == {"license_risk"}

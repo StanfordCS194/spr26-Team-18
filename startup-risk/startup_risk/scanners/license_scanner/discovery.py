@@ -8,11 +8,27 @@ from startup_risk.core.models import FileSnapshot, RepositorySnapshot
 MANIFEST_NAMES = {
     "package.json",
     "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
     "requirements.txt",
     "pyproject.toml",
     "poetry.lock",
+    "pipfile.lock",
+    "setup.py",
+    "setup.cfg",
     "cargo.toml",
     "cargo.lock",
+    "go.mod",
+    "go.sum",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "gradle.lockfile",
+    "gemfile",
+    "gemfile.lock",
+    "composer.json",
+    "composer.lock",
+    "packages.lock.json",
 }
 LICENSE_PREFIXES = ("license", "license.", "copying", "notice", "third_party_notices")
 VENDORED_DIRS = {"vendor", "third_party", "external", "deps"}
@@ -33,10 +49,11 @@ def discover(snapshot: RepositorySnapshot) -> LicenseDiscovery:
         filename = lower.rsplit("/", maxsplit=1)[-1]
         parts = lower.split("/")
 
-        if file.skipped_reason and filename in MANIFEST_NAMES:
+        is_manifest = filename in MANIFEST_NAMES or filename.endswith((".gemspec", ".csproj"))
+        if file.skipped_reason and is_manifest:
             result.skipped.append(f"{file.path}: {file.skipped_reason}")
             continue
-        if filename in MANIFEST_NAMES:
+        if is_manifest:
             result.manifests.append(file)
         if filename.startswith(LICENSE_PREFIXES):
             result.license_files.append(file)

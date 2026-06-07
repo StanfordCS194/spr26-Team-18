@@ -63,7 +63,7 @@ def _parse_cargo_toml(file: FileSnapshot) -> list[Dependency]:
                     ],
                 )
             )
-    if package_license:
+    if file.path == "Cargo.toml" and (package_name or package_license):
         dependencies.append(
             Dependency(
                 name=package_name or "(rust project)",
@@ -72,17 +72,17 @@ def _parse_cargo_toml(file: FileSnapshot) -> list[Dependency]:
                 relationship="unknown",
                 source_type="metadata",
                 source_file=file.path,
-                source_line=find_line(file.text, "license"),
+                source_line=find_line(file.text, "name") or find_line(file.text, "license"),
                 declared_license=package_license,
                 flags=["local_project"],
                 evidence=[
                     LicenseEvidence(
                         source="local_manifest",
                         file=file.path,
-                        line=find_line(file.text, "license"),
-                        text=package_license,
+                        line=find_line(file.text, "name") or find_line(file.text, "license"),
+                        text=package_license or package_name,
                         detected_license=package_license,
-                        confidence="high",
+                        confidence="high" if package_license else "none",
                     )
                 ],
             )

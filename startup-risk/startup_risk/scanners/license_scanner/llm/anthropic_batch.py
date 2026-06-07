@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from urllib import request
+from urllib import error, request
 
 from startup_risk.scanners.license_scanner.models import LLMBatchResponse, LLMTask
 
@@ -52,12 +52,26 @@ class AnthropicBatchProvider:
         )
         batch_id = batch["id"]
         deadline = time.monotonic() + timeout_seconds
+        last_poll_error: str | None = None
         while time.monotonic() < deadline:
-            current = self._get_json(f"/v1/messages/batches/{batch_id}")
+            try:
+                current = self._get_json(f"/v1/messages/batches/{batch_id}")
+            except (OSError, error.URLError, TimeoutError) as exc:
+                last_poll_error = f"Anthropic batch polling failed transiently: {exc}"
+                time.sleep(poll_interval_seconds)
+                continue
             if current.get("processing_status") == "ended":
-                return self._read_results(batch_id, tasks)
+                try:
+                    return self._read_results(batch_id, tasks)
+                except (OSError, error.URLError, TimeoutError) as exc:
+                    last_poll_error = f"Anthropic batch result fetch failed transiently: {exc}"
+                    time.sleep(poll_interval_seconds)
+                    continue
             time.sleep(poll_interval_seconds)
-        return [LLMBatchResponse(task.task_id, None, "Anthropic batch timed out") for task in tasks]
+        message = "Anthropic batch timed out"
+        if last_poll_error:
+            message = f"{message}; last provider error: {last_poll_error}"
+        return [LLMBatchResponse(task.task_id, None, message) for task in tasks]
 
     def _read_results(self, batch_id: str, tasks: list[LLMTask]) -> list[LLMBatchResponse]:
         content = self._get_text(f"/v1/messages/batches/{batch_id}/results")

@@ -29,6 +29,32 @@ def _parse_package_json(file: FileSnapshot) -> list[Dependency]:
         return []
     dependencies: list[Dependency] = []
 
+    if file.path == "package.json" and data.get("name"):
+        license_value = data.get("license")
+        dependencies.append(
+            Dependency(
+                name=str(data.get("name")),
+                version=str(data.get("version")) if data.get("version") else None,
+                ecosystem="npm",
+                relationship="unknown",
+                source_type="metadata",
+                source_file=file.path,
+                source_line=find_line(file.text, '"name"'),
+                declared_license=str(license_value) if license_value else None,
+                flags=["local_project"],
+                evidence=[
+                    LicenseEvidence(
+                        source="local_manifest",
+                        file=file.path,
+                        line=find_line(file.text, '"name"'),
+                        text=str(license_value or data.get("name")),
+                        detected_license=str(license_value) if license_value else None,
+                        confidence="high" if license_value else "none",
+                    )
+                ],
+            )
+        )
+
     for section in DEPENDENCY_SECTIONS:
         raw_deps = data.get(section)
         if not isinstance(raw_deps, dict):
@@ -100,6 +126,11 @@ def _parse_package_lock(file: FileSnapshot) -> list[Dependency]:
                 continue
             name = package_path.split("node_modules/")[-1]
             license_value = metadata.get("license")
+            flags = _lockfile_flags(metadata, package_path)
+            if metadata.get("resolved"):
+                flags.append(f"artifact_url:{metadata.get('resolved')}")
+            if metadata.get("integrity"):
+                flags.append(f"integrity:{metadata.get('integrity')}")
             line = find_line(file.text, f'"{package_path}"') or find_line(file.text, f'"{name}"')
             evidence = [
                 LicenseEvidence(
@@ -121,6 +152,7 @@ def _parse_package_lock(file: FileSnapshot) -> list[Dependency]:
                     source_file=file.path,
                     source_line=line,
                     declared_license=str(license_value) if license_value else None,
+                    flags=flags,
                     evidence=evidence,
                 )
             )
@@ -132,6 +164,11 @@ def _parse_package_lock(file: FileSnapshot) -> list[Dependency]:
             if not isinstance(metadata, dict):
                 continue
             license_value = metadata.get("license")
+            flags = _lockfile_flags(metadata, name)
+            if metadata.get("resolved"):
+                flags.append(f"artifact_url:{metadata.get('resolved')}")
+            if metadata.get("integrity"):
+                flags.append(f"integrity:{metadata.get('integrity')}")
             line = find_line(file.text, f'"{name}"')
             dependencies.append(
                 Dependency(
@@ -143,6 +180,7 @@ def _parse_package_lock(file: FileSnapshot) -> list[Dependency]:
                     source_file=file.path,
                     source_line=line,
                     declared_license=str(license_value) if license_value else None,
+                    flags=flags,
                     evidence=[
                         LicenseEvidence(
                             source="lockfile",
@@ -163,3 +201,15 @@ def _load_json(text: str) -> Any:
         return json.loads(text)
     except json.JSONDecodeError:
         return None
+
+
+def _lockfile_flags(metadata: dict[str, Any], package_path: str) -> list[str]:
+    flags: list[str] = []
+    if metadata.get("dev") is True or metadata.get("devOptional") is True:
+        flags.append("dependency_scope:lockfile_dev")
+    if metadata.get("optional") is True or metadata.get("devOptional") is True:
+        flags.append("dependency_scope:optionalDependencies")
+    lower_path = package_path.lower()
+    if any(part in lower_path for part in ("test", "tests", "fixture", "fixtures", "devtools", "tooling")):
+        flags.append("dependency_scope:lockfile_dev")
+    return flags

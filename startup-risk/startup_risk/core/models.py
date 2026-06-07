@@ -206,7 +206,7 @@ class ScanResult(BaseModel):
 
     @model_validator(mode="after")
     def sort_findings(self) -> "ScanResult":
-        self.findings = sorted(self.findings, key=lambda finding: finding.id)
+        self.findings = sorted(self.findings, key=_finding_sort_key)
         return self
 
     @classmethod
@@ -231,13 +231,20 @@ class ScanResult(BaseModel):
             source=source,
             scanned_at=datetime.now(timezone.utc),
             inventory=inventory,
-            findings=sorted(findings, key=lambda finding: finding.id),
+            findings=sorted(findings, key=_finding_sort_key),
             summary=ScanSummary(
                 actionable_findings=len(findings),
                 informational_inventory_signals=inventory.signal_count(),
                 by_severity=severity_counts,
             ),
         )
+
+
+def _finding_sort_key(finding: Finding) -> tuple[int, int, str, str]:
+    severity_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    title = finding.title.lower()
+    is_unknown = "unknown license" in title or finding.id.startswith("license_risk.unknown_license")
+    return (severity_rank[finding.severity], 1 if is_unknown else 0, finding.title, finding.id)
 
 
 def classify_path_role(path: str) -> PathRole:

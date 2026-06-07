@@ -6,12 +6,21 @@ from startup_risk.scanners.license_scanner.models import LicenseClassification
 
 
 LOW_RISK = {
-    "MIT",
-    "BSD-2-Clause",
-    "BSD-3-Clause",
-    "ISC",
+    "0BSD",
     "Apache-2.0",
+    "BlueOak-1.0.0",
+    "BSD-3-Clause",
+    "BSD-2-Clause",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Python-2.0",
     "Unlicense",
+    "W3C",
+}
+CONTENT_DATA_LICENSES = {
+    "CC-BY-3.0",
+    "CC-BY-4.0",
     "CC0-1.0",
 }
 MEDIUM_RISK_PREFIXES = ("LGPL", "MPL", "EPL", "CDDL")
@@ -27,7 +36,13 @@ HIGH_RISK_HINTS = (
 )
 
 
-def classify_license(value: str | None, *, has_notice: bool = False, source: str = "deterministic") -> LicenseClassification:
+def classify_license(
+    value: str | None,
+    *,
+    has_notice: bool = False,
+    source: str = "deterministic",
+    content_data_context: bool = False,
+) -> LicenseClassification:
     normalized = normalize_license(value)
     if normalized is None:
         return LicenseClassification(
@@ -51,7 +66,10 @@ def classify_license(value: str | None, *, has_notice: bool = False, source: str
 
     if " OR " in normalized or " AND " in normalized:
         parts = re.split(r"\s+(?:OR|AND)\s+", normalized)
-        part_results = [classify_license(part, has_notice=has_notice, source=source) for part in parts]
+        part_results = [
+            classify_license(part, has_notice=has_notice, source=source, content_data_context=content_data_context)
+            for part in parts
+        ]
         if any(result.priority == "high" for result in part_results):
             priority = "high"
         elif any(result.priority == "medium" for result in part_results):
@@ -77,6 +95,16 @@ def classify_license(value: str | None, *, has_notice: bool = False, source: str
             source="deterministic" if source != "llm" else "llm",
         )
 
+    if normalized in CONTENT_DATA_LICENSES:
+        return LicenseClassification(
+            normalized_license=normalized,
+            priority="low" if content_data_context else "medium",
+            confidence="high",
+            explanation="Content/data license review recommended.",
+            recommendation="Confirm attribution and data/documentation reuse obligations for this package.",
+            source="deterministic" if source != "llm" else "llm",
+        )
+
     if normalized in LOW_RISK:
         return LicenseClassification(
             normalized_license=normalized,
@@ -99,7 +127,7 @@ def classify_license(value: str | None, *, has_notice: bool = False, source: str
 
     return LicenseClassification(
         normalized_license=normalized,
-        priority="high",
+        priority="medium",
         confidence="medium",
         explanation=f"{normalized} is not in the scanner's low-risk allowlist.",
         recommendation="Review the license text and approve or replace the dependency before production use.",
@@ -113,52 +141,75 @@ def normalize_license(value: str | None) -> str | None:
     raw = value.strip()
     if not raw or raw.upper() in {"UNKNOWN", "UNLICENSED", "SEE LICENSE IN LICENSE", "SEE LICENSE"}:
         return None
-    raw = raw.strip("()")
-    compact = raw.upper()
+    raw = raw.strip("()").strip()
+    expression = _normalize_license_expression(raw)
+    if expression != raw:
+        return expression
     exact = {
+        "0BSD": "0BSD",
         "MIT": "MIT",
+        "MIT-0": "MIT-0",
         "ISC": "ISC",
         "UNLICENSE": "Unlicense",
         "UNLICENSED": None,
         "APACHE-2.0": "Apache-2.0",
+        "APACHE 2": "Apache-2.0",
+        "APACHE LICENSE 2.0": "Apache-2.0",
+        "APACHE-2": "Apache-2.0",
         "BSD-2-CLAUSE": "BSD-2-Clause",
+        "BSD 2-CLAUSE": "BSD-2-Clause",
         "BSD-3-CLAUSE": "BSD-3-Clause",
-        "CC0-1.0": "CC0-1.0",
-    }
-    if compact in exact:
-        return exact[compact]
-    replacements = {
-        "Apache 2": "Apache-2.0",
-        "Apache License 2.0": "Apache-2.0",
-        "Apache-2": "Apache-2.0",
+        "BSD 3-CLAUSE": "BSD-3-Clause",
         "BSD": "BSD-3-Clause",
-        "BSD 2-Clause": "BSD-2-Clause",
-        "BSD 3-Clause": "BSD-3-Clause",
+        "BLUEOAK-1.0.0": "BlueOak-1.0.0",
+        "PYTHON-2.0": "Python-2.0",
+        "W3C": "W3C",
+        "CC-BY-3.0": "CC-BY-3.0",
+        "CC-BY-4.0": "CC-BY-4.0",
+        "CC0-1.0": "CC0-1.0",
         "CC0": "CC0-1.0",
-        "GPLv2": "GPL-2.0",
-        "GPLv3": "GPL-3.0",
-        "AGPLv3": "AGPL-3.0",
+        "GPLV2": "GPL-2.0",
+        "GPLV3": "GPL-3.0",
+        "AGPLV3": "AGPL-3.0",
     }
-    for old, new in replacements.items():
-        raw = re.sub(rf"\b{re.escape(old)}\b", new, raw, flags=re.IGNORECASE)
     compact = raw.upper()
     if compact in exact:
         return exact[compact]
     return raw
 
 
+def _normalize_license_expression(raw: str) -> str:
+    parts = re.split(r"\s+(OR|AND)\s+", raw, flags=re.IGNORECASE)
+    if len(parts) == 1:
+        return raw
+    normalized_parts: list[str] = []
+    changed = False
+    for index, part in enumerate(parts):
+        if index % 2 == 1:
+            operator = part.upper()
+            normalized_parts.append(operator)
+            changed = changed or operator != part
+            continue
+        normalized = normalize_license(part.strip())
+        if normalized is None:
+            normalized = part.strip()
+        normalized_parts.append(normalized)
+        changed = changed or normalized != part.strip()
+    return " ".join(normalized_parts) if changed else raw
+
+
 def detect_license_from_text(text: str | None) -> str | None:
     if not text:
         return None
     sample = text[:40_000].lower()
+    if "mozilla public license" in sample:
+        return "MPL-2.0"
     if "gnu affero general public license" in sample:
         return "AGPL-3.0"
     if "gnu general public license" in sample:
         return "GPL-3.0"
     if "gnu lesser general public license" in sample:
         return "LGPL-3.0"
-    if "mozilla public license" in sample:
-        return "MPL-2.0"
     if "apache license" in sample and "version 2.0" in sample:
         return "Apache-2.0"
     if "permission is hereby granted, free of charge" in sample and "mit" in sample[:1000]:
@@ -180,7 +231,7 @@ def is_known_spdx_like(value: str | None) -> bool:
     normalized = normalize_license(value)
     if normalized is None:
         return False
-    if normalized in LOW_RISK:
+    if normalized in LOW_RISK or normalized in CONTENT_DATA_LICENSES:
         return True
     if normalized.startswith(MEDIUM_RISK_PREFIXES):
         return True

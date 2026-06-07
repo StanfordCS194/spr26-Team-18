@@ -15,6 +15,9 @@ def default_scanners(
     license_llm_prompt_token_budget: int = 200_000,
     license_llm_max_batch_requests: int = 50_000,
     license_llm_max_batch_file_bytes: int = 200_000_000,
+    license_registry_metadata: bool = False,
+    license_artifact_inspection: bool = False,
+    license_source_repo: bool = False,
 ) -> list[Scanner]:
     return [
         StaticHygieneScanner(),
@@ -26,6 +29,9 @@ def default_scanners(
             llm_prompt_token_budget=license_llm_prompt_token_budget,
             llm_max_batch_requests=license_llm_max_batch_requests,
             llm_max_batch_file_bytes=license_llm_max_batch_file_bytes,
+            enable_registry_metadata=license_registry_metadata,
+            enable_artifact_inspection=license_artifact_inspection,
+            enable_source_repo=license_source_repo,
         ),
     ]
 

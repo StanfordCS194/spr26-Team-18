@@ -1,4 +1,5 @@
 import json as _json
+import sys
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Optional
@@ -7,7 +8,7 @@ import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
 from app.ranking import rank_bills
@@ -446,6 +447,70 @@ class StartupSummaryRequest(BaseModel):
     composite: int
     axes: dict
     top_actions: list
+
+
+class LicenseScanOptions(BaseModel):
+    deterministic_only: bool = False
+    llm_provider: str | None = None
+    batch_timeout_hours: float = 24
+    poll_interval_seconds: int = 60
+    registry_metadata: bool = False
+    artifact_inspection: bool = False
+    source_repo: bool = False
+
+
+class LicenseScanRequest(BaseModel):
+    repo_path: str
+    options: LicenseScanOptions = Field(default_factory=LicenseScanOptions)
+
+
+@app.post("/api/startup/license/scan")
+def startup_license_scan(req: LicenseScanRequest):
+    """Run the startup-risk license scanner with path-safe local/GitHub targets."""
+    startup_risk_root = Path(__file__).resolve().parents[1] / "startup-risk"
+    if str(startup_risk_root) not in sys.path:
+        sys.path.insert(0, str(startup_risk_root))
+
+    from startup_risk.core.engine import ScanEngine
+    from startup_risk.ingest.repository import RepositoryIngestor
+    from startup_risk.outputs.json_output import result_to_json
+    from startup_risk.scanners.license_scanner import LicenseRiskScanner
+
+    target = req.repo_path.strip()
+    if not target:
+        raise HTTPException(400, "repo_path is required.")
+    if req.options.deterministic_only is False and req.options.batch_timeout_hours <= 0:
+        raise HTTPException(400, "batch_timeout_hours must be positive.")
+
+    if target.startswith(("http://", "https://")):
+        safe_target = target
+    else:
+        workspace_root = Path(__file__).resolve().parents[1]
+        candidate = Path(target).expanduser().resolve()
+        if workspace_root not in candidate.parents and candidate != workspace_root:
+            raise HTTPException(400, "Local repo_path must be inside the workspace root.")
+        safe_target = str(candidate)
+
+    scanner = LicenseRiskScanner(
+        deterministic_only=req.options.deterministic_only,
+        provider_name=req.options.llm_provider,
+        batch_timeout_seconds=int(req.options.batch_timeout_hours * 60 * 60),
+        poll_interval_seconds=req.options.poll_interval_seconds,
+        enable_registry_metadata=req.options.registry_metadata,
+        enable_artifact_inspection=req.options.artifact_inspection,
+        enable_source_repo=req.options.source_repo,
+    )
+    try:
+        result = ScanEngine(
+            ingestor=RepositoryIngestor(max_file_bytes=2_000_000),
+            scanners=[scanner],
+        ).scan(safe_target)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"License scan failed: {exc}") from exc
+
+    return _json.loads(result_to_json(result))
 
 
 @app.post("/api/startup/summary")

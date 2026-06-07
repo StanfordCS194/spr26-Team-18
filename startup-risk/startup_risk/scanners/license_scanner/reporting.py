@@ -7,6 +7,7 @@ from startup_risk.scanners.license_scanner.models import Dependency, LicenseClas
 
 SCANNER_ID = "license_risk"
 SCANNER_VERSION = "1.0.0"
+MAX_EVIDENCE_EXCERPT_CHARS = 800
 
 
 def finding_for_license(
@@ -106,7 +107,7 @@ def _finding_evidence(evidence: LicenseEvidence) -> FindingEvidence:
     return FindingEvidence(
         location=_location(evidence.file, evidence.line),
         description=_description(evidence),
-        excerpt=(evidence.text or None),
+        excerpt=_bounded_excerpt(evidence.text),
     )
 
 
@@ -122,12 +123,24 @@ def _location(path: str | None, line: int | None) -> SourceLocation | None:
     return SourceLocation(path=path, line_start=line, line_end=line)
 
 
+def _bounded_excerpt(text: str | None) -> str | None:
+    if text is None:
+        return None
+    if len(text) <= MAX_EVIDENCE_EXCERPT_CHARS:
+        return text
+    return text[:MAX_EVIDENCE_EXCERPT_CHARS].rstrip() + "..."
+
+
 def classification_for_unknown_license(
     dependency: Dependency,
     *,
     deterministic_only: bool,
 ) -> LicenseClassification:
-    if is_vendored_dependency(dependency) and not is_dev_dependency(dependency):
+    if (
+        is_vendored_dependency(dependency)
+        and "vendored_license_metadata_present" not in dependency.flags
+        and not is_dev_dependency(dependency)
+    ):
         priority = "high"
         confidence = "medium"
     elif is_dev_dependency(dependency):
@@ -156,6 +169,8 @@ def is_dev_dependency(dependency: Dependency) -> bool:
         flag in {
             "dependency_scope:devDependencies",
             "dependency_scope:docs",
+            "dependency_scope:lockfile_dev",
+            "dependency_scope:optionalDependencies",
             "dependency_scope:test",
         }
         for flag in dependency.flags

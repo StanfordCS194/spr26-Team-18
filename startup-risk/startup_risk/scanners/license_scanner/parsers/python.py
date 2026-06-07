@@ -75,32 +75,34 @@ def _parse_pyproject(file: FileSnapshot) -> list[Dependency]:
                 continue
             dependencies.append(_dependency_from_spec(file, name, str(version), name))
 
-    project_license = data.get("project", {}).get("license")
+    project = data.get("project", {})
+    project_license = project.get("license")
     license_value = None
     if isinstance(project_license, str):
         license_value = project_license
     elif isinstance(project_license, dict):
         license_value = project_license.get("text")
-    if license_value:
+    project_name = project.get("name")
+    if file.path == "pyproject.toml" and (project_name or license_value):
         dependencies.append(
             Dependency(
-                name=data.get("project", {}).get("name") or "(python project)",
-                version=data.get("project", {}).get("version"),
+                name=project_name or "(python project)",
+                version=project.get("version"),
                 ecosystem="python",
                 relationship="unknown",
                 source_type="metadata",
                 source_file=file.path,
-                source_line=find_line(file.text, "license"),
+                source_line=find_line(file.text, "name") or find_line(file.text, "license"),
                 declared_license=license_value,
                 flags=["local_project"],
                 evidence=[
                     LicenseEvidence(
                         source="local_manifest",
                         file=file.path,
-                        line=find_line(file.text, "license"),
-                        text=str(license_value),
-                        detected_license=str(license_value),
-                        confidence="high",
+                        line=find_line(file.text, "name") or find_line(file.text, "license"),
+                        text=str(license_value or project_name),
+                        detected_license=str(license_value) if license_value else None,
+                        confidence="high" if license_value else "none",
                     )
                 ],
             )

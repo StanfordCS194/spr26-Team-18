@@ -6,7 +6,15 @@ from typing import Literal
 
 Relationship = Literal["direct", "transitive", "vendored", "unknown"]
 SourceType = Literal["manifest", "lockfile", "metadata", "vendored_code"]
-EvidenceSource = Literal["local_manifest", "local_license_file", "lockfile", "llm"]
+EvidenceSource = Literal[
+    "local_manifest",
+    "local_license_file",
+    "lockfile",
+    "registry_metadata",
+    "package_artifact",
+    "source_repo",
+    "llm",
+]
 Confidence = Literal["none", "low", "medium", "high"]
 Priority = Literal["low", "medium", "high"]
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Iterable
@@ -21,7 +22,8 @@ from startup_risk.scanners.license_scanner.models import (
     LicenseClassification,
     LicenseEvidence,
 )
-from startup_risk.scanners.license_scanner.parsers import generic, npm, python, rust
+from startup_risk.scanners.license_scanner.parsers import dotnet, generic, go, java, npm, php, python, ruby, rust
+from startup_risk.scanners.license_scanner.registry_metadata import RegistryMetadataError, fetch_registry_metadata
 from startup_risk.scanners.license_scanner.reporting import (
     SCANNER_ID,
     SCANNER_VERSION,
@@ -30,6 +32,14 @@ from startup_risk.scanners.license_scanner.reporting import (
     finding_for_license,
     finding_for_skipped,
 )
+from startup_risk.scanners.license_scanner.safe_artifacts import (
+    UnsafeArtifactError,
+    download_artifact,
+    iter_likely_license_texts,
+    safe_extract_archive,
+)
+from startup_risk.scanners.license_scanner.source_repo import SourceRepoError, fetch_source_repo_license_evidence
+from startup_risk.scanners.license_scanner.licenses import detect_license_from_text
 
 
 class LicenseScannerConfigError(ValueError):
@@ -53,6 +63,9 @@ class LicenseRiskScanner:
         llm_prompt_token_budget: int | None = None,
         llm_max_batch_requests: int | None = None,
         llm_max_batch_file_bytes: int | None = None,
+        enable_registry_metadata: bool = False,
+        enable_artifact_inspection: bool = False,
+        enable_source_repo: bool = False,
     ) -> None:
         self.deterministic_only = deterministic_only
         self.batch_provider = batch_provider
@@ -69,6 +82,9 @@ class LicenseRiskScanner:
         self.llm_max_batch_file_bytes = llm_max_batch_file_bytes or int(
             os.getenv("LICENSE_SCANNER_LLM_MAX_BATCH_FILE_BYTES", "200000000")
         )
+        self.enable_registry_metadata = enable_registry_metadata
+        self.enable_artifact_inspection = enable_artifact_inspection
+        self.enable_source_repo = enable_source_repo
 
     def scan(self, snapshot: RepositorySnapshot) -> list[Finding]:
         provider = self.batch_provider
@@ -78,6 +94,10 @@ class LicenseRiskScanner:
         discovered = discover(snapshot)
         dependencies = self._parse_dependencies(discovered.manifests, discovered.vendored_files)
         dependencies = _dedupe_dependencies(dependencies)
+        _mark_self_dependencies(dependencies)
+        registry_skipped = self._enrich_registry_metadata(dependencies) if self.enable_registry_metadata else []
+        artifact_skipped = self._enrich_artifacts(dependencies) if self.enable_artifact_inspection else []
+        source_skipped = self._enrich_source_repos(dependencies) if self.enable_source_repo else []
 
         llm_results: dict[str, LLMItemResult] = {}
         llm_errors: dict[str, str] = {}
@@ -95,9 +115,22 @@ class LicenseRiskScanner:
         findings: list[Finding] = []
         for skipped in discovered.skipped:
             findings.append(finding_for_skipped(skipped))
+        for skipped in registry_skipped:
+            findings.append(finding_for_skipped(skipped))
+        for skipped in artifact_skipped:
+            findings.append(finding_for_skipped(skipped))
+        for skipped in source_skipped:
+            findings.append(finding_for_skipped(skipped))
         for dependency in dependencies:
             for flag in dependency.flags:
-                if flag.startswith("vendored_root:") or flag.startswith("dependency_scope:") or flag == "local_project":
+                if (
+                    flag.startswith("vendored_root:")
+                    or flag.startswith("dependency_scope:")
+                    or flag.startswith("artifact_url:")
+                    or flag.startswith("integrity:")
+                    or flag.startswith("source_repo:")
+                    or flag in {"local_project", "self_dependency", "vendored_license_metadata_present"}
+                ):
                     continue
                 findings.append(finding_for_flag(dependency, flag))
             if _skip_license_risk(dependency):
@@ -135,12 +168,87 @@ class LicenseRiskScanner:
                 findings.append(finding)
         return _dedupe_findings(findings)
 
+    def _enrich_registry_metadata(self, dependencies: list[Dependency]) -> list[str]:
+        skipped: list[str] = []
+        for dependency in dependencies:
+            if _skip_license_risk(dependency) or _license_value(dependency):
+                continue
+            try:
+                metadata = fetch_registry_metadata(dependency)
+            except RegistryMetadataError as exc:
+                skipped.append(f"{dependency.ecosystem}:{dependency.name}: registry metadata lookup failed: {exc}")
+                continue
+            if metadata.evidence is not None:
+                dependency.evidence.append(metadata.evidence)
+                dependency.declared_license = metadata.evidence.detected_license
+            if metadata.artifact_url and not _flag_value(dependency, "artifact_url"):
+                dependency.flags.append(f"artifact_url:{metadata.artifact_url}")
+            if metadata.source_repo_url and not _flag_value(dependency, "source_repo"):
+                dependency.flags.append(f"source_repo:{metadata.source_repo_url}")
+        return skipped
+
+    def _enrich_artifacts(self, dependencies: list[Dependency]) -> list[str]:
+        skipped: list[str] = []
+        for dependency in dependencies:
+            if _skip_license_risk(dependency) or _license_value(dependency):
+                continue
+            artifact_url = _flag_value(dependency, "artifact_url")
+            if not artifact_url:
+                continue
+            try:
+                archive = download_artifact(artifact_url, integrity=_flag_value(dependency, "integrity"))
+                extracted = safe_extract_archive(archive)
+                for path, text in iter_likely_license_texts(extracted):
+                    detected = detect_license_from_text(text)
+                    if detected or text.strip():
+                        evidence = LicenseEvidence(
+                            source="package_artifact",
+                            file=path,
+                            line=1,
+                            text=text[:8000],
+                            detected_license=detected,
+                            confidence="medium" if detected else "low",
+                        )
+                        dependency.evidence.append(evidence)
+                        if detected:
+                            dependency.declared_license = detected
+                            break
+            except UnsafeArtifactError as exc:
+                skipped.append(f"{dependency.ecosystem}:{dependency.name}: artifact inspection skipped: {exc}")
+            except Exception as exc:
+                skipped.append(f"{dependency.ecosystem}:{dependency.name}: artifact inspection failed: {exc}")
+        return skipped
+
+    def _enrich_source_repos(self, dependencies: list[Dependency]) -> list[str]:
+        skipped: list[str] = []
+        for dependency in dependencies:
+            if _skip_license_risk(dependency) or _license_value(dependency):
+                continue
+            source_repo = _flag_value(dependency, "source_repo")
+            if not source_repo:
+                continue
+            try:
+                evidence = fetch_source_repo_license_evidence(source_repo)
+            except SourceRepoError as exc:
+                skipped.append(f"{dependency.ecosystem}:{dependency.name}: source repo lookup failed: {exc}")
+                continue
+            if evidence is not None:
+                dependency.evidence.append(evidence)
+                if evidence.detected_license:
+                    dependency.declared_license = evidence.detected_license
+        return skipped
+
     def _parse_dependencies(self, manifests, vendored_files) -> list[Dependency]:
         dependencies: list[Dependency] = []
         for file in manifests:
             dependencies.extend(npm.parse(file))
             dependencies.extend(python.parse(file))
             dependencies.extend(rust.parse(file))
+            dependencies.extend(go.parse(file))
+            dependencies.extend(java.parse(file))
+            dependencies.extend(ruby.parse(file))
+            dependencies.extend(php.parse(file))
+            dependencies.extend(dotnet.parse(file))
         dependencies.extend(generic.parse_vendored(vendored_files))
         return dependencies
 
@@ -155,7 +263,7 @@ class LicenseRiskScanner:
                 evidence=dependency.evidence,
             )
             for dependency in dependencies
-            if not _skip_license_risk(dependency)
+            if _needs_llm_review(dependency)
         ]
         tasks: list[LLMTask] = []
         task_to_items: dict[str, list[str]] = {}
@@ -266,12 +374,7 @@ def _merged_classification(
     *,
     deterministic_only: bool,
 ) -> LicenseClassification:
-    license_value = _license_value(dependency)
-    deterministic = (
-        classification_for_unknown_license(dependency, deterministic_only=deterministic_only)
-        if license_value is None
-        else classify_license(license_value, has_notice=_has_notice(dependency))
-    )
+    deterministic = _deterministic_classification(dependency, deterministic_only=deterministic_only)
     if llm_error or llm_result is None:
         return deterministic
     llm_license = normalize_license(llm_result.detected_license)
@@ -281,12 +384,17 @@ def _merged_classification(
         return replace(
             unknown,
             confidence="low" if llm_result.confidence == "low" else unknown.confidence,
-            explanation=llm_result.reason or unknown.explanation,
+            explanation="The scanner and LLM review could not establish a license from the available local evidence.",
             source="llm",
         )
     if confidence == "high" and not is_known_spdx_like(llm_license):
         confidence = "medium"
-    llm_classification = classify_license(llm_license, has_notice=_has_notice(dependency), source="llm")
+    llm_classification = classify_license(
+        llm_license,
+        has_notice=_has_notice(dependency),
+        source="llm",
+        content_data_context=_is_content_data_dependency(dependency),
+    )
     llm_classification = replace(llm_classification, confidence=confidence)
 
     if llm_result.needs_review or llm_result.is_custom_or_modified:
@@ -370,12 +478,101 @@ def _license_value(dependency: Dependency) -> str | None:
     return None
 
 
+def _deterministic_classification(dependency: Dependency, *, deterministic_only: bool) -> LicenseClassification:
+    license_value = _license_value(dependency)
+    if license_value is None:
+        return classification_for_unknown_license(dependency, deterministic_only=deterministic_only)
+    return classify_license(
+        license_value,
+        has_notice=_has_notice(dependency),
+        content_data_context=_is_content_data_dependency(dependency),
+    )
+
+
 def _has_notice(dependency: Dependency) -> bool:
-    return any((evidence.file or "").lower().rsplit("/", maxsplit=1)[-1].startswith("notice") for evidence in dependency.evidence)
+    if "vendored_license_metadata_present" in dependency.flags:
+        return True
+    notice_or_metadata_files = {
+        "cargo.lock",
+        "cargo.toml",
+        "composer.json",
+        "package-lock.json",
+        "package.json",
+        "pyproject.toml",
+        "readme.chromium",
+    }
+    for evidence in dependency.evidence:
+        filename = (evidence.file or "").lower().rsplit("/", maxsplit=1)[-1]
+        if filename.startswith(("notice", "license", "copying")) or filename in notice_or_metadata_files:
+            return True
+        if evidence.source in {"lockfile", "local_manifest", "registry_metadata", "package_artifact", "source_repo"}:
+            return True
+    return False
 
 
 def _skip_license_risk(dependency: Dependency) -> bool:
-    return dependency.source_type == "metadata" and "local_project" not in dependency.flags
+    if "self_dependency" in dependency.flags or "local_project" in dependency.flags:
+        return True
+    return dependency.source_type == "metadata"
+
+
+def _needs_llm_review(dependency: Dependency) -> bool:
+    if _skip_license_risk(dependency):
+        return False
+    classification = _deterministic_classification(dependency, deterministic_only=False)
+    return classification.normalized_license is None or classification.priority != "low"
+
+
+def _is_content_data_dependency(dependency: Dependency) -> bool:
+    text = " ".join(
+        [
+            dependency.name,
+            dependency.source_file or "",
+            *[evidence.text or "" for evidence in dependency.evidence[:3]],
+        ]
+    ).lower()
+    indicators = (
+        "browser",
+        "browserslist",
+        "caniuse",
+        "compat",
+        "data",
+        "dataset",
+        "docs",
+        "documentation",
+        "mdn",
+        "metadata",
+        "spdx",
+        "webidl",
+    )
+    return any(indicator in text for indicator in indicators)
+
+
+def _flag_value(dependency: Dependency, prefix: str) -> str | None:
+    marker = prefix + ":"
+    for flag in dependency.flags:
+        if flag.startswith(marker):
+            return flag.removeprefix(marker)
+    return None
+
+
+def _mark_self_dependencies(dependencies: list[Dependency]) -> None:
+    local_names_by_ecosystem: dict[str, set[str]] = {}
+    for dependency in dependencies:
+        if "local_project" not in dependency.flags:
+            continue
+        local_names_by_ecosystem.setdefault(dependency.ecosystem, set()).add(_normalize_package_name(dependency.name))
+
+    for dependency in dependencies:
+        if "local_project" in dependency.flags:
+            continue
+        local_names = local_names_by_ecosystem.get(dependency.ecosystem, set())
+        if _normalize_package_name(dependency.name) in local_names and "self_dependency" not in dependency.flags:
+            dependency.flags.append("self_dependency")
+
+
+def _normalize_package_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def _dedupe_dependencies(dependencies: Iterable[Dependency]) -> list[Dependency]:
@@ -390,7 +587,30 @@ def _dedupe_dependencies(dependencies: Iterable[Dependency]) -> list[Dependency]
         current.flags.extend(flag for flag in dependency.flags if flag not in current.flags)
         if current.declared_license is None and dependency.declared_license:
             current.declared_license = dependency.declared_license
-    return list(by_key.values())
+    return _merge_npm_manifest_specs_into_lockfile(list(by_key.values()))
+
+
+def _merge_npm_manifest_specs_into_lockfile(dependencies: list[Dependency]) -> list[Dependency]:
+    lockfile_by_name: dict[str, list[Dependency]] = {}
+    for dependency in dependencies:
+        if dependency.ecosystem == "npm" and dependency.source_type == "lockfile":
+            lockfile_by_name.setdefault(_normalize_package_name(dependency.name), []).append(dependency)
+
+    merged: list[Dependency] = []
+    for dependency in dependencies:
+        if dependency.ecosystem != "npm" or dependency.source_type != "manifest":
+            merged.append(dependency)
+            continue
+        lockfile_matches = lockfile_by_name.get(_normalize_package_name(dependency.name), [])
+        if len(lockfile_matches) != 1:
+            merged.append(dependency)
+            continue
+        target = lockfile_matches[0]
+        target.evidence.extend(dependency.evidence)
+        target.flags.extend(flag for flag in dependency.flags if flag not in target.flags)
+        if target.declared_license is None and dependency.declared_license:
+            target.declared_license = dependency.declared_license
+    return merged
 
 
 def _dedupe_findings(findings: Iterable[Finding]) -> list[Finding]:

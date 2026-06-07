@@ -20,6 +20,7 @@ def default_scanners(
     license_registry_metadata: bool = False,
     license_artifact_inspection: bool = False,
     license_source_repo: bool = False,
+    vuln_osv: bool = False,
 ) -> list[Scanner]:
     return [
         StaticHygieneScanner(),
@@ -36,6 +37,7 @@ def default_scanners(
             enable_artifact_inspection=license_artifact_inspection,
             enable_source_repo=license_source_repo,
         ),
+        DependencyVulnScanner(enable_osv=vuln_osv),
     ]
 
 

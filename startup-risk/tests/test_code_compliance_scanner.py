@@ -50,15 +50,53 @@ def test_secure_cookie_not_flagged():
     assert not any("insecure_cookie" in f.id for f in findings)
 
 
-def test_detects_minor_flow_without_consent():
-    snap = _snapshot(("src/signup.py", "for minor in user_list: create_account(minor)"))
+def test_detects_under_13_without_consent():
+    snap = _snapshot(("src/signup.py", "if user_age < 13: create_account(user)"))
     findings = scanner.scan(snap)
     assert any("minor_flow_no_consent" in f.id for f in findings)
 
 
-def test_minor_with_coppa_not_flagged():
-    code = "# COPPA: parental consent required for under-13 users\nif is_minor: require_parent_consent()"
+def test_detects_coppa_reference_without_controls():
+    snap = _snapshot(("src/signup.py", "# COPPA applies here"))
+    findings = scanner.scan(snap)
+    assert any("minor_flow_no_consent" in f.id for f in findings)
+
+
+def test_detects_underage_without_consent():
+    snap = _snapshot(("src/onboarding.py", "if underage: block_signup()"))
+    findings = scanner.scan(snap)
+    assert any("minor_flow_no_consent" in f.id for f in findings)
+
+
+def test_minor_with_consent_not_flagged():
+    code = "if age < 13: require_parent_consent()"
     snap = _snapshot(("src/signup.py", code))
+    findings = scanner.scan(snap)
+    assert not any("minor_flow_no_consent" in f.id for f in findings)
+
+
+def test_coppa_without_consent_fires():
+    # COPPA mention is the signal; without a nearby consent/guardian gate it should fire.
+    snap = _snapshot(("src/signup.py", "# COPPA applies here"))
+    findings = scanner.scan(snap)
+    assert any("minor_flow_no_consent" in f.id for f in findings)
+
+
+def test_coppa_with_consent_not_flagged():
+    code = "# COPPA: parental consent required\nif age < 13: require_guardian_consent()"
+    snap = _snapshot(("src/signup.py", code))
+    findings = scanner.scan(snap)
+    assert not any("minor_flow_no_consent" in f.id for f in findings)
+
+
+def test_tree_child_not_flagged():
+    snap = _snapshot(("src/tree.py", "for child in node.children: traverse(child)"))
+    findings = scanner.scan(snap)
+    assert not any("minor_flow_no_consent" in f.id for f in findings)
+
+
+def test_minor_version_not_flagged():
+    snap = _snapshot(("src/versioning.py", "major, minor, patch = version.split('.')"))
     findings = scanner.scan(snap)
     assert not any("minor_flow_no_consent" in f.id for f in findings)
 
@@ -88,8 +126,14 @@ def test_detects_mixpanel():
     assert any("tracking_sdk" in f.id for f in findings)
 
 
-def test_detects_personal_data_without_governance():
+def test_detects_attribute_assignment_without_governance():
     snap = _snapshot(("src/user.py", "user.email = form.email"))
+    findings = scanner.scan(snap)
+    assert any("personal_data_no_controls" in f.id for f in findings)
+
+
+def test_detects_bare_assignment_without_governance():
+    snap = _snapshot(("src/profile.py", "email = request.data['email']"))
     findings = scanner.scan(snap)
     assert any("personal_data_no_controls" in f.id for f in findings)
 
@@ -99,6 +143,29 @@ def test_personal_data_with_governance_not_flagged():
     snap = _snapshot(("src/user.py", code))
     findings = scanner.scan(snap)
     assert not any("personal_data_no_controls" in f.id for f in findings)
+
+
+def test_stdlib_email_import_not_flagged():
+    snap = _snapshot(("src/utils.py", "from email.utils import format_datetime"))
+    findings = scanner.scan(snap)
+    assert not any("personal_data_no_controls" in f.id for f in findings)
+
+
+def test_email_method_call_not_flagged():
+    snap = _snapshot(("src/mail.py", "message = email.message()"))
+    findings = scanner.scan(snap)
+    assert not any("personal_data_no_controls" in f.id for f in findings)
+
+
+def test_html_email_type_not_flagged():
+    snap = _snapshot(("src/form.py", "field = '<input type=\"email\" name=\"email\">'"))
+    findings = scanner.scan(snap)
+    assert not any("personal_data_no_controls" in f.id for f in findings)
+
+
+def test_skips_test_files():
+    snap = _snapshot(("tests/test_auth.py", "localStorage.setItem('token', value)"))
+    assert scanner.scan(snap) == []
 
 
 def test_skips_docs_files():

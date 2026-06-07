@@ -18,9 +18,12 @@ _SOURCE_EXTENSIONS = frozenset({
     ".swift", ".php", ".c", ".cpp", ".rs", ".scala",
 })
 
-_SKIP_PATH_ROLES = frozenset({"docs"})
+_SKIP_PATH_ROLES = frozenset({"docs", "tests"})
 _MAX_LINE_LEN = 500
 _CONTEXT_RADIUS = 4  # lines above/below to check for nearby controls
+
+# Lines that are module imports carry no runtime compliance risk.
+_IMPORT_LINE = re.compile(r"^\s*(?:from\s+\S+\s+import|import\s+\S)")
 
 
 # Rule 1 — auth token in browser storage (JS/TS only but harmless elsewhere)
@@ -38,12 +41,29 @@ _COOKIE_SET = re.compile(
 )
 _COOKIE_SECURE = re.compile(r"(?:httponly|secure|samesite)", re.IGNORECASE)
 
-# Rule 3 — child/minor flow without consent
+# Rule 3 — minor/child user flow without consent
+# Requires age-specific syntax to avoid matching DOM/tree "child" nodes and
+# "minor version" language that are ubiquitous in non-privacy code.
+# Rule 3 signal: age-specific patterns only — avoids the common false positives
+# from DOM/tree "child" nodes and "minor version" language.
+# Note on age comparison: (?<![a-z])age allows user_age, min_age, etc. while
+# rejecting false matches inside words like "storage".
 _MINOR_SIGNAL = re.compile(
-    r"\b(?:child(?:ren)?|minor|under.?13|coppa)\b", re.IGNORECASE
+    r"""(?:
+        \bunder.{0,5}(?:13|18)\b                # "under 13", "under-13", "under 18"
+        |\bunderage\b                            # "underage"
+        |\bcoppa\b                               # explicit COPPA reference
+        |(?<![a-z])age\b\s*[<>=!]+\s*1[3-9]\b  # user_age < 13, age <= 18, etc.
+        |\bminor\s+user\b                        # "minor user" — age context required
+        |\bchild\s+user\b                        # "child user" — age context required
+    )""",
+    re.IGNORECASE | re.VERBOSE,
 )
+# Controls: consent/guardian mechanisms. No word boundaries — control terms must
+# match inside compound identifiers like require_parent_consent(), age_gate_check().
+# COPPA is the regulation being addressed, not itself a control.
 _MINOR_CONTROLS = re.compile(
-    r"\b(?:coppa|parental|guardian|consent|age.?gate|age.?verif)\b", re.IGNORECASE
+    r"(?:parental|guardian|consent|age.?gate|age.?verif)", re.IGNORECASE
 )
 
 # Rule 4 — health/clinical data without PHI controls
@@ -63,11 +83,19 @@ _TRACKING_SDK = re.compile(
     re.IGNORECASE,
 )
 
-# Rule 6 — personal data field without data-governance handling
+# Rule 6 — personal data field being stored without data-governance handling.
+# Matches only assignment/storage context to avoid false positives from the
+# `email` stdlib module, HTML type attributes, dict string keys, and comments.
 _PERSONAL_DATA = re.compile(
-    r"""\b(?:email|phone(?:_number)?|address|birthdate|date_of_birth|dob"""
-    r"""|ssn|social_security|geolocation|location_data|ip_address)\b""",
-    re.IGNORECASE,
+    r"""(?:
+        # Object attribute being written: user.email =, obj.phone =
+        (?<=[a-zA-Z0-9_])\.(?:email|phone(?:_number)?|ssn|date_of_birth|birthdate|geolocation|ip_address)\s*=(?!=)
+        |
+        # Bare variable being assigned (not ==): email =, phone_number =
+        # The negative lookbehind avoids matching inside dotted names like `email.utils`
+        (?<![.\w])(?:email|phone_number|ssn|date_of_birth|birthdate|geolocation|ip_address)\s*=(?!=)
+    )""",
+    re.IGNORECASE | re.VERBOSE,
 )
 _DATA_GOVERNANCE = re.compile(
     r"""\b(?:delet|retention|minimiz|consent|privacy|encrypt|anonymize|pseudonymize)\b""",
@@ -113,6 +141,9 @@ class CodeComplianceScanner:
                 continue
             stripped = line.strip()
             if not stripped:
+                continue
+
+            if _IMPORT_LINE.match(stripped):
                 continue
 
             ctx = _context(lines, i)

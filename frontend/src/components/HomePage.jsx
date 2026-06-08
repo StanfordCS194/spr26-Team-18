@@ -37,7 +37,7 @@ function useCountUp(target, duration = 1800, delay = 0) {
 const STEPS = [
   {
     n: "01",
-    Icon: Github,
+    Icon: GitBranch,
     title: "Paste a GitHub URL",
     body: "Link any public repository. No account, no install, no code execution — we read only.",
     tags: ["Public repos", "No OAuth", "Static analysis only"],

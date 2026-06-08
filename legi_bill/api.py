@@ -7,14 +7,14 @@ from typing import Optional
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
 from app.ranking import rank_bills
-from .config import OPENAI_MODEL, load_config
+from .config import load_config
 from .grader import grade_company
 from .legal_intelligence import detect_industry, calculate_savings
+from .llm import LLMConfigError, LLMProviderCapabilityError, get_chat_client
 from .storage import init_db, get_all_bills, get_bill_with_summary_and_questions
 
 app = FastAPI(title="Legi-Bill API")
@@ -273,6 +273,8 @@ def _bill_details_payload(bill_number: str) -> dict:
 def match_chat(
     messages: str = Form(...),
     file: Optional[UploadFile] = File(None),
+    llm_provider: Optional[str] = Form(None),
+    llm_model: Optional[str] = Form(None),
 ):
     try:
         history = _json.loads(messages)
@@ -297,40 +299,38 @@ def match_chat(
                 }
                 break
 
-    cfg = load_config()
-    api_key = cfg.get("openai_api_key", "")
-    if not api_key or api_key.startswith("stub"):
-        raise HTTPException(
-            503,
-            "OPENAI_API_KEY is not configured. Set a real key in .env to enable chat.",
-        )
-
-    client = OpenAI(api_key=api_key)
+    try:
+        client = get_chat_client(provider=llm_provider, model=llm_model)
+    except LLMConfigError as e:
+        raise HTTPException(503, str(e)) from e
     full = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}, *history]
     matches: Optional[list] = None
 
     for _ in range(3):
         try:
-            response = client.chat.completions.create(
-                model=OPENAI_MODEL,
+            response = client.complete(
                 messages=full,
                 tools=CHAT_TOOLS,
                 tool_choice="auto",
             )
+        except LLMProviderCapabilityError as e:
+            raise HTTPException(400, str(e)) from e
         except Exception as e:
-            raise HTTPException(502, f"OpenAI API error: {e}")
+            raise HTTPException(502, f"LLM API error: {e}")
 
-        msg = response.choices[0].message
+        tool_calls = response.tool_calls or []
 
-        if msg.tool_calls:
+        if tool_calls:
             full.append({
                 "role": "assistant",
-                "content": msg.content or "",
-                "tool_calls": [tc.model_dump() for tc in msg.tool_calls],
+                "content": response.content or "",
+                "tool_calls": tool_calls,
             })
-            for tc in msg.tool_calls:
-                args = _json.loads(tc.function.arguments or "{}")
-                if tc.function.name == "run_match":
+            for tc in tool_calls:
+                function = tc.get("function", {}) if isinstance(tc, dict) else {}
+                args = _json.loads(function.get("arguments") or "{}")
+                function_name = function.get("name")
+                if function_name == "run_match":
                     matches = _rank_for_description(args.get("description", ""))
                     tool_result = {
                         "matches_returned": len(matches),
@@ -339,18 +339,18 @@ def match_chat(
                             for m in matches[:5]
                         ],
                     }
-                elif tc.function.name == "get_bill_details":
+                elif function_name == "get_bill_details":
                     tool_result = _bill_details_payload(args.get("bill_number", ""))
                 else:
-                    tool_result = {"error": f"unknown tool {tc.function.name}"}
+                    tool_result = {"error": f"unknown tool {function_name}"}
                 full.append({
                     "role": "tool",
-                    "tool_call_id": tc.id,
+                    "tool_call_id": tc.get("id", "") if isinstance(tc, dict) else "",
                     "content": _json.dumps(tool_result),
                 })
             continue
 
-        return {"message": msg.content or "", "matches": matches}
+        return {"message": response.content or "", "matches": matches}
 
     raise HTTPException(500, "Chat tool-call loop did not converge")
 
@@ -359,6 +359,8 @@ def match_chat(
 def grade(
     company_text: Optional[str] = Form(None),
     company_name: Optional[str] = Form(None),
+    llm_provider: Optional[str] = Form(None),
+    llm_model: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
 ):
     """Score a company across the 5 regulatory exposure axes with evidence.
@@ -384,14 +386,6 @@ def grade(
             detail="Provide a non-empty file or company_text.",
         )
 
-    cfg = load_config()
-    api_key = cfg.get("openai_api_key", "")
-    if not api_key or api_key.startswith("stub"):
-        raise HTTPException(
-            503,
-            "OPENAI_API_KEY is not configured. Set a real key in .env to enable grading.",
-        )
-
     # Use the same enrichment pattern as /api/match — bills + their summary text
     # if available — so the ranker has the richest possible corpus to match against.
     conn = get_conn()
@@ -405,8 +399,10 @@ def grade(
     name = company_name or (fname.rsplit(".", 1)[0] if fname else None)
 
     try:
-        client = OpenAI(api_key=api_key)
+        client = get_chat_client(provider=llm_provider, model=llm_model)
         result = grade_company(client, enriched, text, company_name=name)
+    except LLMConfigError as e:
+        raise HTTPException(503, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
@@ -447,11 +443,14 @@ class StartupSummaryRequest(BaseModel):
     composite: int
     axes: dict
     top_actions: list
+    llm_provider: str | None = None
+    llm_model: str | None = None
 
 
 class LicenseScanOptions(BaseModel):
     deterministic_only: bool = False
     llm_provider: str | None = None
+    llm_model: str | None = None
     batch_timeout_hours: float = 24
     poll_interval_seconds: int = 60
     registry_metadata: bool = False
@@ -494,6 +493,7 @@ def startup_license_scan(req: LicenseScanRequest):
     scanner = LicenseRiskScanner(
         deterministic_only=req.options.deterministic_only,
         provider_name=req.options.llm_provider,
+        model_name=req.options.llm_model,
         batch_timeout_seconds=int(req.options.batch_timeout_hours * 60 * 60),
         poll_interval_seconds=req.options.poll_interval_seconds,
         enable_registry_metadata=req.options.registry_metadata,
@@ -516,11 +516,6 @@ def startup_license_scan(req: LicenseScanRequest):
 @app.post("/api/startup/summary")
 def startup_summary(req: StartupSummaryRequest):
     """Synthesize a short verdict over the deterministic startup-health grade."""
-    cfg = load_config()
-    api_key = cfg.get("openai_api_key", "")
-    if not api_key or api_key.startswith("stub"):
-        raise HTTPException(503, "OPENAI_API_KEY not configured.")
-
     lines = [
         f"Startup: {req.name}",
         f"Composite grade: {req.grade} ({req.composite}/100)",
@@ -551,9 +546,8 @@ def startup_summary(req: StartupSummaryRequest):
     )
 
     try:
-        client = OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
-            model=cfg.get("openai_model", OPENAI_MODEL) or "gpt-4o-mini",
+        client = _get_llm_client(provider=req.llm_provider, model=req.llm_model)
+        resp = client.complete(
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": "\n".join(lines)},
@@ -561,17 +555,21 @@ def startup_summary(req: StartupSummaryRequest):
             temperature=0.4,
             max_tokens=180,
         )
-        verdict = (resp.choices[0].message.content or "").strip()
+        verdict = (resp.content or "").strip()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(502, f"Summary generation failed: {e}")
 
-    return {"verdict": verdict, "model": cfg.get("openai_model", OPENAI_MODEL)}
+    return {"verdict": verdict, "model": resp.model, "provider": resp.provider}
 
 
 class StartupCustomRulesRequest(BaseModel):
     questionnaire: dict  # { stage, customers, sensitive_data, regulated_industry, gtm, ... }
     prd_text: Optional[str] = None
     github_summary: Optional[dict] = None  # passed through so rules can reference repo facts
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
 
 
 class StartupCustomGradeRequest(BaseModel):
@@ -579,14 +577,15 @@ class StartupCustomGradeRequest(BaseModel):
     prd_text: Optional[str] = None
     github_summary: Optional[dict] = None
     spreadsheet_summary: Optional[dict] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
 
 
-def _require_openai():
-    cfg = load_config()
-    api_key = cfg.get("openai_api_key", "")
-    if not api_key or api_key.startswith("stub"):
-        raise HTTPException(503, "OPENAI_API_KEY not configured.")
-    return cfg, api_key
+def _get_llm_client(provider: str | None = None, model: str | None = None):
+    try:
+        return get_chat_client(provider=provider, model=model)
+    except LLMConfigError as e:
+        raise HTTPException(503, str(e)) from e
 
 
 @app.post("/api/startup/custom-rules")
@@ -597,8 +596,6 @@ def startup_custom_rules(req: StartupCustomRulesRequest):
     of 5-8 rules with id, title, weight, what_to_check (criteria the grader will
     use), and a fix. These rules form the "custom" axis in the rubric.
     """
-    cfg, api_key = _require_openai()
-
     q = req.questionnaire or {}
     lines = ["Founder questionnaire:"]
     for k, v in q.items():
@@ -633,9 +630,8 @@ def startup_custom_rules(req: StartupCustomRulesRequest):
     )
 
     try:
-        client = OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
-            model=cfg.get("openai_model", OPENAI_MODEL) or "gpt-4o-mini",
+        client = _get_llm_client(provider=req.llm_provider, model=req.llm_model)
+        resp = client.complete(
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_msg},
@@ -644,7 +640,7 @@ def startup_custom_rules(req: StartupCustomRulesRequest):
             max_tokens=900,
             response_format={"type": "json_object"},
         )
-        raw = (resp.choices[0].message.content or "").strip()
+        raw = (resp.content or "").strip()
         parsed = _json.loads(raw)
         rules = parsed.get("rules") or []
         if not isinstance(rules, list) or not rules:
@@ -658,10 +654,12 @@ def startup_custom_rules(req: StartupCustomRulesRequest):
                 "what_to_check": str(r.get("what_to_check") or "")[:600],
                 "fix": str(r.get("fix") or "")[:240],
             })
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(502, f"Rule generation failed: {e}")
 
-    return {"rules": cleaned, "model": cfg.get("openai_model", OPENAI_MODEL)}
+    return {"rules": cleaned, "model": resp.model, "provider": resp.provider}
 
 
 @app.post("/api/startup/custom-grade")
@@ -669,8 +667,6 @@ def startup_custom_grade(req: StartupCustomGradeRequest):
     """LLM grades the repo + PRD against the custom rules. Returns pass/fail
     per rule with evidence ('observed') the user will see in the drilldown.
     """
-    cfg, api_key = _require_openai()
-
     if not req.rules:
         raise HTTPException(400, "No rules to grade against.")
 
@@ -717,9 +713,8 @@ def startup_custom_grade(req: StartupCustomGradeRequest):
     )
 
     try:
-        client = OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
-            model=cfg.get("openai_model", OPENAI_MODEL) or "gpt-4o-mini",
+        client = _get_llm_client(provider=req.llm_provider, model=req.llm_model)
+        resp = client.complete(
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_msg},
@@ -728,7 +723,7 @@ def startup_custom_grade(req: StartupCustomGradeRequest):
             max_tokens=900,
             response_format={"type": "json_object"},
         )
-        raw = (resp.choices[0].message.content or "").strip()
+        raw = (resp.content or "").strip()
         parsed = _json.loads(raw)
         results = parsed.get("results") or []
         by_id = {str(r.get("id")): r for r in results if isinstance(r, dict)}
@@ -744,10 +739,12 @@ def startup_custom_grade(req: StartupCustomGradeRequest):
                 "observed": str(hit.get("observed") or "no evidence found")[:240],
                 "fix": r.get("fix") or "",
             })
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(502, f"Custom grading failed: {e}")
 
-    return {"results": cleaned, "model": cfg.get("openai_model", OPENAI_MODEL)}
+    return {"results": cleaned, "model": resp.model, "provider": resp.provider}
 
 
 @app.get("/api/bills/{bill_number}")

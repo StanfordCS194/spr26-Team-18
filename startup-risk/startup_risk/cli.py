@@ -24,6 +24,7 @@ class OutputFormat(str, Enum):
 class LicenseLLMProvider(str, Enum):
     openai = "openai"
     anthropic = "anthropic"
+    gemini = "gemini"
 
 
 app = typer.Typer(
@@ -52,6 +53,10 @@ def scan(
     license_llm_provider: Annotated[
         LicenseLLMProvider | None,
         typer.Option("--license-llm-provider", help="Batch LLM provider for license scanning."),
+    ] = None,
+    license_llm_model: Annotated[
+        str | None,
+        typer.Option("--license-llm-model", help="Batch LLM model for license scanning."),
     ] = None,
     license_batch_timeout_hours: Annotated[
         float,
@@ -118,6 +123,7 @@ def scan(
             LicenseRiskScanner(
                 deterministic_only=deterministic_only,
                 provider_name=license_llm_provider.value if license_llm_provider else None,
+                model_name=license_llm_model,
                 batch_timeout_seconds=int(license_batch_timeout_hours * 60 * 60),
                 poll_interval_seconds=license_poll_interval_seconds,
                 llm_prompt_token_budget=license_llm_prompt_token_budget,
@@ -132,6 +138,7 @@ def scan(
         scanners = default_scanners(
             deterministic_license_only=deterministic_only,
             license_llm_provider=license_llm_provider.value if license_llm_provider else None,
+            license_llm_model=license_llm_model,
             license_batch_timeout_seconds=int(license_batch_timeout_hours * 60 * 60),
             license_poll_interval_seconds=license_poll_interval_seconds,
             license_llm_prompt_token_budget=license_llm_prompt_token_budget,

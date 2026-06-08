@@ -32,7 +32,7 @@ startup-risk/           Python scanner backend (FastAPI)
   └─ core/              Finding, RepositorySnapshot, RepositoryInventory models
   └─ ingest/            GitHub repo fetcher — clones public repos into a snapshot
   └─ scanners/          Scanner implementations (see below)
-  └─ analysis/          LLM summary layer (Anthropic)
+  └─ analysis/          LLM summary layer via central provider gateway
   └─ outputs/           JSON and text report formatters
 ```
 
@@ -56,9 +56,13 @@ cd frontend && npm install && npm run dev
 
 Open [http://localhost:5173](http://localhost:5173).
 
-**API keys** (add to `.env`):
-- `ANTHROPIC_API_KEY` — LLM-assisted license classification and finding summaries
-- `OPENAI_API_KEY` — alternative provider (optional)
+**LLM API keys** (add one to `.env`; optional `LLM_PROVIDER` / `LLM_MODEL` can force routing):
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `GEMINI_API_KEY`
+
+When OpenAI is selected, repo LLM calls use OpenAI Batch API requests targeting `/v1/chat/completions`
+by default. No embedding calls are used.
 
 ---
 

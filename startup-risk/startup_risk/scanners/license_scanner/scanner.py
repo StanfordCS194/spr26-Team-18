@@ -4,15 +4,13 @@ import json
 import os
 import re
 from dataclasses import replace
-from pathlib import Path
 from typing import Iterable
 
 from startup_risk.core.models import Finding, RepositorySnapshot
+from startup_risk.llm import estimate_batch_request_bytes, get_batch_provider, load_local_dotenv
 from startup_risk.scanners.license_scanner.discovery import discover
 from startup_risk.scanners.license_scanner.licenses import classify_license, is_known_spdx_like, normalize_license
-from startup_risk.scanners.license_scanner.llm.anthropic_batch import AnthropicBatchProvider
 from startup_risk.scanners.license_scanner.llm.base import BatchProvider, build_prompt
-from startup_risk.scanners.license_scanner.llm.openai_batch import OpenAIBatchProvider, estimate_openai_request_bytes
 from startup_risk.scanners.license_scanner.models import (
     Dependency,
     LLMBatchResponse,
@@ -57,6 +55,7 @@ class LicenseRiskScanner:
         deterministic_only: bool = False,
         batch_provider: BatchProvider | None = None,
         provider_name: str | None = None,
+        model_name: str | None = None,
         batch_timeout_seconds: int = 24 * 60 * 60,
         poll_interval_seconds: int = 60,
         task_item_limit: int = 10,
@@ -70,6 +69,7 @@ class LicenseRiskScanner:
         self.deterministic_only = deterministic_only
         self.batch_provider = batch_provider
         self.provider_name = provider_name
+        self.model_name = model_name
         self.batch_timeout_seconds = batch_timeout_seconds
         self.poll_interval_seconds = poll_interval_seconds
         self.task_item_limit = task_item_limit
@@ -89,7 +89,7 @@ class LicenseRiskScanner:
     def scan(self, snapshot: RepositorySnapshot) -> list[Finding]:
         provider = self.batch_provider
         if not self.deterministic_only and provider is None:
-            provider = provider_from_env(self.provider_name)
+            provider = provider_from_env(self.provider_name, self.model_name)
 
         discovered = discover(snapshot)
         dependencies = self._parse_dependencies(discovered.manifests, discovered.vendored_files)
@@ -276,7 +276,13 @@ class LicenseRiskScanner:
             task_id = f"license-scan-{task_index:04d}"
             prompt = build_prompt(chunk)
             estimated_tokens = estimate_prompt_tokens(prompt)
-            estimated_bytes = estimate_task_request_bytes(task_id, chunk, prompt)
+            estimated_bytes = estimate_task_request_bytes(
+                task_id,
+                chunk,
+                prompt,
+                provider_name=self.provider_name,
+                model_name=self.model_name,
+            )
             if (
                 len(tasks) + 1 > self.llm_max_batch_requests
                 or used_prompt_tokens + estimated_tokens > self.llm_prompt_token_budget
@@ -304,57 +310,18 @@ class LicenseRiskScanner:
         return tasks, task_to_items, budget_errors
 
 
-def provider_from_env(provider_name: str | None = None) -> BatchProvider:
-    _load_local_dotenv()
-    provider = (provider_name or os.getenv("LICENSE_SCANNER_LLM_PROVIDER") or "openai").lower()
-    if provider == "openai":
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise LicenseScannerConfigError(
-                "OPENAI_API_KEY is required for license scanning unless --deterministic-only is set."
-            )
-        return OpenAIBatchProvider(
-            api_key=api_key,
-            model=os.getenv("LICENSE_SCANNER_OPENAI_MODEL", "gpt-4o-mini"),
-            base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com"),
+def provider_from_env(provider_name: str | None = None, model_name: str | None = None) -> BatchProvider:
+    load_local_dotenv()
+    try:
+        return get_batch_provider(
+            provider=provider_name,
+            model=model_name,
             max_batch_requests=int(os.getenv("LICENSE_SCANNER_LLM_MAX_BATCH_REQUESTS", "50000")),
             max_batch_file_bytes=int(os.getenv("LICENSE_SCANNER_LLM_MAX_BATCH_FILE_BYTES", "200000000")),
             max_prompt_tokens=int(os.getenv("LICENSE_SCANNER_LLM_PROMPT_TOKEN_BUDGET", "200000")),
         )
-    if provider == "anthropic":
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise LicenseScannerConfigError(
-                "ANTHROPIC_API_KEY is required for license scanning unless --deterministic-only is set."
-            )
-        return AnthropicBatchProvider(
-            api_key=api_key,
-            model=os.getenv("LICENSE_SCANNER_ANTHROPIC_MODEL", "claude-3-5-haiku-latest"),
-            base_url=os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
-        )
-    raise LicenseScannerConfigError("LICENSE_SCANNER_LLM_PROVIDER must be 'openai' or 'anthropic'.")
-
-
-def _load_local_dotenv() -> None:
-    """Load simple KEY=VALUE pairs from the nearest .env without overriding real env vars."""
-    for directory in [Path.cwd(), *Path.cwd().parents]:
-        env_path = directory / ".env"
-        if not env_path.exists():
-            continue
-        try:
-            lines = env_path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            return
-        for line in lines:
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
-                continue
-            key, value = stripped.split("=", maxsplit=1)
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = value
-        return
+    except ValueError as exc:
+        raise LicenseScannerConfigError(str(exc)) from exc
 
 
 def estimate_prompt_tokens(text: str) -> int:
@@ -362,9 +329,19 @@ def estimate_prompt_tokens(text: str) -> int:
     return max(1, (len(text) + 2) // 3)
 
 
-def estimate_task_request_bytes(task_id: str, items: list[LLMTaskItem], prompt: str) -> int:
+def estimate_task_request_bytes(
+    task_id: str,
+    items: list[LLMTaskItem],
+    prompt: str,
+    provider_name: str | None = None,
+    model_name: str | None = None,
+) -> int:
     task = LLMTask(task_id=task_id, items=items, prompt=prompt, estimated_prompt_tokens=estimate_prompt_tokens(prompt))
-    return estimate_openai_request_bytes(task, os.getenv("LICENSE_SCANNER_OPENAI_MODEL", "gpt-4o-mini"))
+    return estimate_batch_request_bytes(
+        task,
+        provider=provider_name or os.getenv("LICENSE_SCANNER_LLM_PROVIDER"),
+        model=model_name,
+    )
 
 
 def _merged_classification(

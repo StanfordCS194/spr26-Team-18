@@ -15,6 +15,7 @@ def default_scanners(
     *,
     deterministic_license_only: bool = False,
     license_llm_provider: str | None = None,
+    license_llm_model: str | None = None,
     license_batch_timeout_seconds: int = 24 * 60 * 60,
     license_poll_interval_seconds: int = 60,
     license_llm_prompt_token_budget: int = 200_000,
@@ -32,6 +33,7 @@ def default_scanners(
         LicenseRiskScanner(
             deterministic_only=deterministic_license_only,
             provider_name=license_llm_provider,
+            model_name=license_llm_model,
             batch_timeout_seconds=license_batch_timeout_seconds,
             poll_interval_seconds=license_poll_interval_seconds,
             llm_prompt_token_budget=license_llm_prompt_token_budget,

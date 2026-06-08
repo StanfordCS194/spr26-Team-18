@@ -1,45 +1,33 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, Component } from "react";
 import {
-  Github, Search, ChevronRight, CheckCircle2, Circle,
-  AlertTriangle, XCircle, Info, Heart, DollarSign, Globe,
-  BookOpen, Code2, Cpu, Building2, Layers, ArrowLeft,
-  ShieldAlert, FileSearch, Package, Lock, BarChart2,
-  Loader2, ExternalLink, ChevronDown, ChevronUp,
-  Clock, Trophy, Bug, Zap,
+  GitBranch, Search, ChevronRight, CheckCircle2, AlertTriangle,
+  XCircle, Info, ShieldAlert, Loader2, ExternalLink,
+  ChevronDown, ChevronUp, ArrowLeft, Clock, Trophy, Bug,
 } from "lucide-react";
 
-// ── Industry verticals ────────────────────────────────────────────────────────
+// ── Error boundary ────────────────────────────────────────────────────────────
 
-const INDUSTRIES = [
-  { id: "health",     label: "Health & MedTech",   Icon: Heart,      desc: "HIPAA · PHI · patient data",           color: "text-rose-500",   bg: "bg-rose-50",   border: "border-rose-200" },
-  { id: "fintech",    label: "Fintech",             Icon: DollarSign, desc: "PCI DSS · financial regulations",      color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-200" },
-  { id: "saas",       label: "Consumer SaaS",       Icon: Globe,      desc: "GDPR · CCPA · privacy",                color: "text-blue-500",   bg: "bg-blue-50",   border: "border-blue-200" },
-  { id: "edtech",     label: "EdTech",              Icon: BookOpen,   desc: "FERPA · COPPA · student data",         color: "text-violet-500", bg: "bg-violet-50", border: "border-violet-200" },
-  { id: "devtools",   label: "Developer Tools",     Icon: Code2,      desc: "OSS licenses · supply chain",          color: "text-orange-500", bg: "bg-orange-50", border: "border-orange-200" },
-  { id: "ai",         label: "AI / ML",             Icon: Cpu,        desc: "AI data use · training data",          color: "text-purple-500", bg: "bg-purple-50", border: "border-purple-200" },
-  { id: "enterprise", label: "Enterprise B2B",      Icon: Building2,  desc: "SOC 2 · access control · compliance",  color: "text-slate-600",  bg: "bg-slate-50",  border: "border-slate-200" },
-  { id: "other",      label: "Other / General",     Icon: Layers,     desc: "General security & hygiene scan",      color: "text-text-secondary", bg: "bg-chip", border: "border-border" },
-];
-
-// ── Scanners that run per scan ────────────────────────────────────────────────
-
-const BASE_SCANNERS = [
-  { id: "hygiene",      label: "Static hygiene",         Icon: FileSearch },
-  { id: "deps",         label: "Dependency supply chain", Icon: Package },
-  { id: "licenses",     label: "License inventory",      Icon: Lock },
-  { id: "analytics",    label: "Analytics & privacy",    Icon: BarChart2 },
-];
-
-const INDUSTRY_SCANNERS = {
-  health:     [{ id: "hipaa",   label: "HIPAA / PHI rules",        Icon: Heart }],
-  fintech:    [{ id: "pci",     label: "PCI DSS / financial data", Icon: DollarSign }],
-  saas:       [{ id: "gdpr",    label: "GDPR / CCPA compliance",   Icon: Globe }],
-  edtech:     [{ id: "ferpa",   label: "FERPA / COPPA rules",      Icon: BookOpen }],
-  devtools:   [{ id: "oss",     label: "OSS license risk",         Icon: Code2 }],
-  ai:         [{ id: "aidata",  label: "AI data use rules",        Icon: Cpu }],
-  enterprise: [{ id: "soc2",    label: "SOC 2 readiness checks",   Icon: Building2 }],
-  other:      [],
-};
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center space-y-3">
+          <p className="text-[15px] font-semibold text-red-700">Something went wrong rendering results</p>
+          <p className="text-[12px] font-mono text-red-500">{this.state.error.message}</p>
+          <button
+            onClick={() => this.setState({ error: null })}
+            className="mt-2 rounded-xl border border-red-200 px-4 py-2 text-[13px] text-red-600 hover:bg-red-100 transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ── Severity config ───────────────────────────────────────────────────────────
 
@@ -51,66 +39,66 @@ const SEV = {
   info:     { label: "Info",     color: "text-slate-500",  bg: "bg-slate-50",  border: "border-slate-200",  Icon: Info },
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+const SEVERITIES = ["critical", "high", "medium", "low", "info"];
 
-function validateGithubUrl(url) {
-  return /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(\/?)$/.test(url.trim());
-}
+// ── Industry list ─────────────────────────────────────────────────────────────
 
-function ownerRepo(url) {
-  const m = url.trim().match(/github\.com\/([\w.-]+\/[\w.-]+)/);
-  return m ? m[1] : url;
-}
+const INDUSTRIES = [
+  { id: "saas",       label: "Consumer SaaS"      },
+  { id: "health",     label: "Health & MedTech"   },
+  { id: "fintech",    label: "Fintech"             },
+  { id: "devtools",   label: "Developer Tools"     },
+  { id: "ai",         label: "AI / ML"             },
+  { id: "edtech",     label: "EdTech"              },
+  { id: "enterprise", label: "Enterprise B2B"      },
+  { id: "other",      label: "Other / General"     },
+];
 
 // ── Finding card ──────────────────────────────────────────────────────────────
 
 function FindingCard({ finding }) {
   const [open, setOpen] = useState(false);
-  const sev = SEV[finding.severity] ?? SEV.info;
-  const SevIcon = sev.Icon;
+  const cfg = SEV[finding.severity] ?? SEV.info;
+  const SevIcon = cfg.Icon;
 
   return (
-    <div className={`rounded-2xl border ${sev.border} ${sev.bg} overflow-hidden`}>
+    <div className={`rounded-2xl border ${cfg.border} ${cfg.bg} overflow-hidden`}>
       <button
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-start gap-3 px-5 py-4 text-left"
       >
-        <SevIcon className={`mt-0.5 h-4 w-4 shrink-0 ${sev.color}`} strokeWidth={2.2} />
+        <SevIcon className={`mt-0.5 h-4 w-4 shrink-0 ${cfg.color}`} strokeWidth={2.2} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[14px] font-semibold text-text-primary leading-snug">
-              {finding.title}
+            <span className="text-[14px] font-semibold text-text-primary">{finding.title}</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${cfg.color} ${cfg.bg} border ${cfg.border}`}>
+              {cfg.label}
             </span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${sev.color} ${sev.bg} border ${sev.border}`}>
-              {sev.label}
-            </span>
-            {finding.confidence && (
-              <span className="rounded-full px-2 py-0.5 text-[11px] text-text-muted bg-chip border border-border">
-                {finding.confidence} confidence
-              </span>
-            )}
           </div>
           <p className="mt-1 text-[13px] text-text-secondary leading-relaxed line-clamp-2">
             {finding.description}
           </p>
         </div>
-        {open ? (
-          <ChevronUp className="shrink-0 h-4 w-4 text-text-muted mt-0.5" />
-        ) : (
-          <ChevronDown className="shrink-0 h-4 w-4 text-text-muted mt-0.5" />
-        )}
+        {open
+          ? <ChevronUp className="shrink-0 h-4 w-4 text-text-muted mt-0.5" />
+          : <ChevronDown className="shrink-0 h-4 w-4 text-text-muted mt-0.5" />
+        }
       </button>
 
       {open && (
         <div className="px-5 pb-4 space-y-3 border-t border-border/40 pt-3">
-          {finding.evidence && finding.evidence.length > 0 && (
+          {finding.evidence?.length > 0 && (
             <div>
               <div className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">Evidence</div>
               <div className="space-y-1">
                 {finding.evidence.map((ev, i) => (
                   <div key={i} className="flex items-start gap-2 text-[12px] text-text-secondary font-mono bg-white/60 rounded-lg px-3 py-1.5 border border-border/50">
-                    <span className="text-text-muted shrink-0">{ev.file ?? ev.source ?? "—"}{ev.line ? `:${ev.line}` : ""}</span>
-                    {ev.excerpt && <span className="text-text-primary truncate">{ev.excerpt}</span>}
+                    <span className="text-text-muted shrink-0">
+                      {ev.file || "—"}{ev.line ? `:${ev.line}` : ""}
+                    </span>
+                    {ev.excerpt && (
+                      <span className="text-text-primary truncate">{ev.excerpt}</span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -128,132 +116,18 @@ function FindingCard({ finding }) {
   );
 }
 
-// ── Scanning animation ────────────────────────────────────────────────────────
-
-function ScanningView({ scanners, log }) {
-  return (
-    <div className="space-y-8 py-4">
-      <div className="flex flex-col items-center gap-3 text-center">
-        <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-accent-gold/10 border border-accent-gold/30">
-          <Loader2 className="h-7 w-7 text-accent-gold animate-spin" strokeWidth={2} />
-        </div>
-        <div>
-          <h2 className="text-[20px] font-bold text-text-primary">Scanning repository…</h2>
-          <p className="text-[13px] text-text-secondary mt-1">Running {scanners.length} scanners. This takes about 15–30 seconds.</p>
-        </div>
-      </div>
-
-      <div className="rounded-3xl border border-border bg-card p-6 shadow-card space-y-3 max-w-lg mx-auto">
-        {scanners.map((s) => {
-          const done = log.includes(s.id);
-          const active = !done && log.length === scanners.findIndex((x) => x.id === s.id);
-          return (
-            <div key={s.id} className="flex items-center gap-3">
-              {done ? (
-                <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" strokeWidth={2} />
-              ) : active ? (
-                <Loader2 className="h-5 w-5 text-accent-gold shrink-0 animate-spin" strokeWidth={2} />
-              ) : (
-                <Circle className="h-5 w-5 text-text-muted shrink-0" strokeWidth={1.5} />
-              )}
-              <span className={`text-[14px] ${done ? "text-text-primary font-medium" : active ? "text-accent-gold font-medium" : "text-text-muted"}`}>
-                {s.label}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // ── Results view ──────────────────────────────────────────────────────────────
 
-// ── Trivy comparison callout ──────────────────────────────────────────────────
+function ResultsView({ results, repoUrl, onReset }) {
+  const findings = Array.isArray(results.findings) ? results.findings : [];
 
-function TrivyComparison({ comparison, ourVulnCount }) {
-  if (!comparison) return null;
-  const weWon = ourVulnCount > comparison.trivy_vulns;
-  return (
-    <div className={`rounded-2xl border p-5 ${weWon ? "border-emerald-200 bg-emerald-50" : "border-border bg-card"}`}>
-      <div className="flex items-start gap-3">
-        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${weWon ? "bg-emerald-100 border border-emerald-200" : "bg-chip border border-border"}`}>
-          <Trophy className={`h-4 w-4 ${weWon ? "text-emerald-600" : "text-text-muted"}`} strokeWidth={2} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-[14px] font-semibold text-text-primary">Benchmark vs. Trivy</span>
-            {weWon && (
-              <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-emerald-700 bg-emerald-100 border border-emerald-200">
-                We found more
-              </span>
-            )}
-          </div>
-          <p className="text-[13px] text-text-secondary leading-relaxed">{comparison.trivy_note}</p>
-          <div className="mt-3 flex gap-4">
-            <div className="text-center">
-              <div className="text-[20px] font-bold text-emerald-600 tabular-nums">{ourVulnCount}</div>
-              <div className="text-[11px] text-text-muted">Our CVEs</div>
-            </div>
-            <div className="flex items-center text-text-muted text-[18px] font-light">vs</div>
-            <div className="text-center">
-              <div className="text-[20px] font-bold text-text-muted tabular-nums">{comparison.trivy_vulns}</div>
-              <div className="text-[11px] text-text-muted">Trivy CVEs</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+  const countBySev = Object.fromEntries(
+    SEVERITIES.map((s) => [s, findings.filter((f) => f.severity === s).length])
   );
-}
 
-// ── CVE highlight banner ──────────────────────────────────────────────────────
-
-function CveBanner({ findings }) {
+  const trivy = results.trivy_comparison;
+  const ourVulns = results.our_vuln_count ?? 0;
   const cves = findings.filter((f) => f.category === "dependency_vulnerability");
-  if (cves.length === 0) return null;
-  return (
-    <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
-      <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-100 border border-red-200">
-          <Bug className="h-4 w-4 text-red-600" strokeWidth={2} />
-        </div>
-        <div>
-          <div className="text-[14px] font-semibold text-red-800 mb-1">
-            {cves.length} known CVE{cves.length !== 1 ? "s" : ""} detected in dependencies
-          </div>
-          {cves.map((f) => (
-            <div key={f.id} className="mt-2">
-              <span className="text-[13px] font-medium text-red-700">{f.title}</span>
-              {f.evidence?.[0]?.excerpt && (
-                <a
-                  href={f.evidence[0].excerpt}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="ml-2 text-[12px] text-red-500 underline hover:text-red-700 inline-flex items-center gap-0.5"
-                >
-                  OSV advisory <ExternalLink className="h-3 w-3" strokeWidth={2} />
-                </a>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ResultsView({ results, repoUrl, industry, onReset }) {
-  const findings = results.findings ?? [];
-  const counts = Object.fromEntries(
-    Object.keys(SEV).map((k) => [k, findings.filter((f) => f.severity === k).length])
-  );
-  const total = findings.length;
-  const ind = INDUSTRIES.find((i) => i.id === industry);
-
-  const bySeverity = ["critical", "high", "medium", "low", "info"]
-    .map((sev) => ({ sev, items: findings.filter((f) => f.severity === sev) }))
-    .filter((g) => g.items.length > 0);
 
   return (
     <div className="space-y-8">
@@ -261,167 +135,170 @@ function ResultsView({ results, repoUrl, industry, onReset }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-text-secondary text-[13px] mb-2">
-            <Github className="h-4 w-4" strokeWidth={1.5} />
-            <a
-              href={repoUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-text-primary flex items-center gap-1 transition-colors"
-            >
-              {ownerRepo(repoUrl)}
+            <GitBranch className="h-4 w-4" strokeWidth={1.5} />
+            <a href={repoUrl} target="_blank" rel="noreferrer"
+              className="hover:text-text-primary flex items-center gap-1 transition-colors">
+              {repoUrl.replace("https://github.com/", "")}
               <ExternalLink className="h-3 w-3" strokeWidth={2} />
             </a>
-            {ind && (
-              <>
-                <span className="text-text-muted">·</span>
-                <ind.Icon className={`h-3.5 w-3.5 ${ind.color}`} strokeWidth={2} />
-                <span>{ind.label}</span>
-              </>
-            )}
           </div>
           <h2 className="text-[24px] font-bold text-text-primary">
-            {total === 0 ? "No findings" : `${total} finding${total !== 1 ? "s" : ""} detected`}
+            {findings.length === 0
+              ? "No findings"
+              : `${findings.length} finding${findings.length !== 1 ? "s" : ""} detected`}
           </h2>
-          <p className="text-[14px] text-text-secondary mt-1">
-            {total === 0
-              ? "This repo looks clean across all scanned dimensions."
-              : "Review each finding below. Severity and confidence are listed independently."}
-          </p>
         </div>
-        <button
-          onClick={onReset}
-          className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-[13px] font-medium text-text-secondary shadow-card hover:text-text-primary transition-colors shrink-0"
-        >
+        <button onClick={onReset}
+          className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-[13px] font-medium text-text-secondary shadow-card hover:text-text-primary transition-colors shrink-0">
           <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2.2} />
           New scan
         </button>
       </div>
 
-      {/* Timing strip */}
+      {/* Timing */}
       {results.timing_seconds && (
-        <div className="flex items-center gap-4 rounded-2xl border border-border bg-card/60 px-5 py-3 shadow-card">
-          <div className="flex items-center gap-1.5 text-[13px] text-text-secondary">
-            <Clock className="h-3.5 w-3.5 text-text-muted" strokeWidth={2} />
-            <span>Scan completed in <strong className="text-text-primary">{results.timing_seconds}s</strong></span>
-          </div>
-          {results.scanners_run?.length > 0 && (
-            <>
-              <span className="text-text-muted">·</span>
-              <div className="flex items-center gap-1.5 text-[13px] text-text-secondary">
-                <Zap className="h-3.5 w-3.5 text-accent-gold" strokeWidth={2} />
-                <span>{results.scanners_run.length} scanner{results.scanners_run.length !== 1 ? "s" : ""} ran</span>
-              </div>
-            </>
-          )}
+        <div className="flex items-center gap-2 text-[13px] text-text-secondary">
+          <Clock className="h-3.5 w-3.5 text-text-muted" strokeWidth={2} />
+          Scan completed in <strong className="text-text-primary ml-1">{results.timing_seconds}s</strong>
         </div>
       )}
 
       {/* CVE banner */}
-      <CveBanner findings={findings} />
+      {cves.length > 0 && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-100 border border-red-200">
+              <Bug className="h-4 w-4 text-red-600" strokeWidth={2} />
+            </div>
+            <div>
+              <div className="text-[14px] font-semibold text-red-800 mb-1">
+                {cves.length} known CVE{cves.length !== 1 ? "s" : ""} detected in dependencies
+              </div>
+              {cves.map((f) => (
+                <div key={f.id} className="mt-2 text-[13px] font-medium text-red-700">
+                  {f.title}
+                  {f.evidence?.[0]?.excerpt && (
+                    <a href={f.evidence[0].excerpt} target="_blank" rel="noreferrer"
+                      className="ml-2 text-[12px] text-red-500 underline inline-flex items-center gap-0.5">
+                      OSV advisory <ExternalLink className="h-3 w-3" strokeWidth={2} />
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Trivy comparison */}
-      <TrivyComparison
-        comparison={results.trivy_comparison}
-        ourVulnCount={results.our_vuln_count ?? 0}
-      />
-
-      {/* Severity summary strip */}
-      <div className="grid grid-cols-5 gap-3">
-        {Object.entries(SEV).map(([key, cfg]) => (
-          <div
-            key={key}
-            className={`rounded-2xl border ${cfg.border} ${cfg.bg} px-4 py-3 text-center`}
-          >
-            <div className={`text-[22px] font-bold tabular-nums ${cfg.color}`}>{counts[key] ?? 0}</div>
-            <div className="text-[11px] text-text-muted mt-0.5">{cfg.label}</div>
+      {trivy && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100 border border-emerald-200">
+              <Trophy className="h-4 w-4 text-emerald-600" strokeWidth={2} />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[14px] font-semibold text-text-primary">Benchmark vs. Trivy</span>
+                {ourVulns > trivy.trivy_vulns && (
+                  <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-emerald-700 bg-emerald-100 border border-emerald-200">
+                    We found more
+                  </span>
+                )}
+              </div>
+              <p className="text-[13px] text-text-secondary leading-relaxed">{trivy.trivy_note}</p>
+              <div className="mt-3 flex gap-6">
+                <div>
+                  <div className="text-[20px] font-bold text-emerald-600">{ourVulns}</div>
+                  <div className="text-[11px] text-text-muted">Our CVEs</div>
+                </div>
+                <div className="flex items-center text-text-muted">vs</div>
+                <div>
+                  <div className="text-[20px] font-bold text-text-muted">{trivy.trivy_vulns}</div>
+                  <div className="text-[11px] text-text-muted">Trivy CVEs</div>
+                </div>
+              </div>
+            </div>
           </div>
-        ))}
+        </div>
+      )}
+
+      {/* Severity counts */}
+      <div className="grid grid-cols-5 gap-3">
+        {SEVERITIES.map((sev) => {
+          const cfg = SEV[sev];
+          return (
+            <div key={sev} className={`rounded-2xl border ${cfg.border} ${cfg.bg} px-4 py-3 text-center`}>
+              <div className={`text-[22px] font-bold tabular-nums ${cfg.color}`}>{countBySev[sev]}</div>
+              <div className="text-[11px] text-text-muted mt-0.5">{cfg.label}</div>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Findings grouped by severity */}
-      {total === 0 ? (
+      {/* Findings */}
+      {findings.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-12 text-center">
           <CheckCircle2 className="h-12 w-12 text-emerald-400" strokeWidth={1.5} />
           <p className="text-[15px] text-text-secondary">No issues found across all scanners.</p>
         </div>
       ) : (
         <div className="space-y-8">
-          {bySeverity.map(({ sev, items }) => {
+          {SEVERITIES.map((sev) => {
+            const items = findings.filter((f) => f.severity === sev);
+            if (items.length === 0) return null;
             const cfg = SEV[sev];
+            const SevIcon = cfg.Icon;
             return (
               <div key={sev} className="space-y-3">
                 <div className="flex items-center gap-3">
-                  <cfg.Icon className={`h-4 w-4 ${cfg.color}`} strokeWidth={2.2} />
+                  <SevIcon className={`h-4 w-4 ${cfg.color}`} strokeWidth={2.2} />
                   <h3 className="text-[13px] font-semibold uppercase tracking-wider text-text-muted">
                     {cfg.label} · {items.length}
                   </h3>
                   <div className="h-px flex-1 bg-border" />
                 </div>
                 <div className="space-y-2">
-                  {items.map((f) => (
-                    <FindingCard key={f.id ?? f.title} finding={f} />
-                  ))}
+                  {items.map((f) => <FindingCard key={f.id || f.title} finding={f} />)}
                 </div>
               </div>
             );
           })}
         </div>
       )}
-
-      {results.disclaimer && (
-        <p className="text-[11px] text-text-muted leading-relaxed border-t border-border pt-4">
-          {results.disclaimer}
-        </p>
-      )}
     </div>
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ── Main scanner component ────────────────────────────────────────────────────
 
 export default function RepoScanner() {
-  const [step, setStep] = useState("form"); // "form" | "scanning" | "results"
+  const [step, setStep] = useState("form"); // form | scanning | results
   const [url, setUrl] = useState("");
-  const [urlError, setUrlError] = useState("");
-  const [industry, setIndustry] = useState(null);
-  const [productName, setProductName] = useState("");
+  const [industry, setIndustry] = useState("");
   const [results, setResults] = useState(null);
-  const [apiError, setApiError] = useState("");
+  const [error, setError] = useState("");
   const [scanLog, setScanLog] = useState([]);
-  const scanners = [
-    ...BASE_SCANNERS,
-    ...(industry ? (INDUSTRY_SCANNERS[industry] ?? []) : []),
-  ];
-  const logRef = useRef(null);
 
-  // Simulate scanner progress ticks while request is in-flight
+  const SCAN_STEPS = ["Hygiene & secrets", "License inventory", "Code compliance", "Dependency vulns", "Summarising"];
+
+  // Tick through progress steps while scanning
   useEffect(() => {
     if (step !== "scanning") return;
     setScanLog([]);
     let i = 0;
-    const interval = setInterval(() => {
-      if (i < scanners.length) {
-        setScanLog((prev) => [...prev, scanners[i].id]);
-        i++;
-      } else {
-        clearInterval(interval);
-      }
-    }, 1800);
-    return () => clearInterval(interval);
+    const iv = setInterval(() => {
+      if (i < SCAN_STEPS.length) { setScanLog((p) => [...p, i]); i++; }
+      else clearInterval(iv);
+    }, 3000);
+    return () => clearInterval(iv);
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleScan() {
-    setUrlError("");
-    setApiError("");
-
-    if (!validateGithubUrl(url)) {
-      setUrlError("Please enter a valid public GitHub URL (https://github.com/owner/repo).");
-      return;
-    }
-    if (!industry) {
-      setUrlError("Please select an industry to load the right scanners.");
-      return;
-    }
+    setError("");
+    if (!url.trim()) { setError("Enter a GitHub URL."); return; }
+    if (!url.includes("github.com")) { setError("Must be a GitHub URL."); return; }
+    if (!industry) { setError("Select an industry."); return; }
 
     setStep("scanning");
 
@@ -429,177 +306,102 @@ export default function RepoScanner() {
       const res = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          repo_url: url.trim(),
-          industry,
-          product_name: productName || undefined,
-        }),
+        body: JSON.stringify({ repo_url: url.trim(), industry, vuln_osv: true }),
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Server error ${res.status}`);
+        const body = await res.text();
+        throw new Error(`Server returned ${res.status}: ${body.slice(0, 200)}`);
       }
 
       const data = await res.json();
       setResults(data);
       setStep("results");
     } catch (err) {
-      // If the backend isn't ready yet, show a friendly placeholder result
-      if (err.message.includes("Failed to fetch") || err.message.includes("404")) {
-        setResults(PLACEHOLDER_RESULTS);
+      // Backend not available → show placeholder
+      if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
+        setResults({ findings: [], timing_seconds: null, trivy_comparison: null, our_vuln_count: 0 });
         setStep("results");
       } else {
-        setApiError(err.message);
+        setError(err.message);
         setStep("form");
       }
     }
-  }
-
-  function handleReset() {
-    setStep("form");
-    setResults(null);
-    setScanLog([]);
-    setApiError("");
   }
 
   // ── Form ──────────────────────────────────────────────────────────────────
 
   if (step === "form") {
     return (
-      <div className="space-y-10">
-        {/* Header */}
-        <div className="space-y-3">
+      <div className="space-y-8">
+        <div className="space-y-2">
           <div className="flex items-center gap-2 text-text-secondary text-[12px] uppercase tracking-widest">
             <ShieldAlert className="h-4 w-4 text-accent-gold" strokeWidth={2} />
             <span>Startup Risk Scanner</span>
           </div>
-          <h1 className="text-[36px] font-bold leading-tight tracking-tight animate-shimmer-text">
+          <h1 className="text-[32px] font-bold leading-tight tracking-tight text-text-primary">
             Scan any public GitHub repo.
           </h1>
-          <p className="text-[16px] text-text-secondary max-w-[560px] leading-relaxed">
-            We compare what your code actually does against known risk patterns — license exposure,
-            privacy gaps, supply chain issues, and industry-specific compliance triggers.
+          <p className="text-[15px] text-text-secondary max-w-[520px] leading-relaxed">
+            Static analysis across secrets, licenses, code compliance, and known CVEs.
+            No code is executed.
           </p>
         </div>
 
-        {/* URL input */}
+        {/* URL */}
         <div className="space-y-2">
-          <label className="text-[13px] font-medium text-text-primary">GitHub repository URL</label>
-          <div className="flex gap-3">
-            <div className="relative flex-1">
-              <Github
-                className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted"
-                strokeWidth={1.5}
-              />
-              <input
-                type="url"
-                value={url}
-                onChange={(e) => { setUrl(e.target.value); setUrlError(""); }}
-                onKeyDown={(e) => e.key === "Enter" && handleScan()}
-                placeholder="https://github.com/owner/repository"
-                className="w-full rounded-2xl border border-border bg-card py-3 pl-10 pr-4 text-[14px] text-text-primary placeholder:text-text-muted shadow-card outline-none focus:border-accent-gold/60 focus:ring-2 focus:ring-accent-gold/20 transition-all"
-              />
-            </div>
+          <label className="text-[13px] font-medium text-text-primary">GitHub URL</label>
+          <div className="relative max-w-lg">
+            <GitBranch className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" strokeWidth={1.5} />
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleScan()}
+              placeholder="https://github.com/owner/repo"
+              className="w-full rounded-2xl border border-border bg-card py-3 pl-11 pr-4 text-[14px] text-text-primary placeholder:text-text-muted shadow-card outline-none focus:border-accent-gold/60 focus:ring-2 focus:ring-accent-gold/20 transition-all"
+            />
           </div>
-          {urlError && (
-            <p className="text-[12px] text-red-500 flex items-center gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2} />
-              {urlError}
-            </p>
-          )}
-          {apiError && (
-            <p className="text-[12px] text-red-500 flex items-center gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2} />
-              {apiError}
-            </p>
-          )}
         </div>
 
-        {/* Optional product name */}
+        {/* Industry */}
         <div className="space-y-2">
-          <label className="text-[13px] font-medium text-text-primary">
-            Product / company name <span className="text-text-muted font-normal">(optional)</span>
-          </label>
-          <input
-            type="text"
-            value={productName}
-            onChange={(e) => setProductName(e.target.value)}
-            placeholder="e.g. Acme Health"
-            className="w-full max-w-sm rounded-2xl border border-border bg-card py-2.5 px-4 text-[14px] text-text-primary placeholder:text-text-muted shadow-card outline-none focus:border-accent-gold/60 focus:ring-2 focus:ring-accent-gold/20 transition-all"
-          />
-        </div>
-
-        {/* Industry selector */}
-        <div className="space-y-3">
-          <label className="text-[13px] font-medium text-text-primary">
-            What kind of product is this?
-            <span className="ml-2 text-text-muted font-normal text-[12px]">
-              — we'll load the right scanners
-            </span>
-          </label>
-          <div className="grid grid-cols-4 gap-3">
-            {INDUSTRIES.map(({ id, label, Icon, desc, color, bg, border }) => {
-              const selected = industry === id;
-              return (
-                <button
-                  key={id}
-                  onClick={() => setIndustry(id)}
-                  className={`group flex flex-col items-start gap-2 rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 ${
-                    selected
-                      ? `${bg} ${border} shadow-card`
-                      : "bg-card border-border shadow-card hover:shadow-card-hover"
-                  }`}
-                >
-                  <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${selected ? bg : "bg-chip"} border ${selected ? border : "border-border"}`}>
-                    <Icon className={`h-4 w-4 ${selected ? color : "text-text-muted group-hover:" + color}`} strokeWidth={2} />
-                  </div>
-                  <div>
-                    <div className={`text-[13px] font-semibold ${selected ? "text-text-primary" : "text-text-primary"}`}>{label}</div>
-                    <div className="text-[11px] text-text-muted leading-snug mt-0.5">{desc}</div>
-                  </div>
-                  {selected && (
-                    <CheckCircle2 className={`h-4 w-4 ${color} self-end mt-1`} strokeWidth={2} />
-                  )}
-                </button>
-              );
-            })}
+          <label className="text-[13px] font-medium text-text-primary">Industry</label>
+          <div className="flex flex-wrap gap-2">
+            {INDUSTRIES.map(({ id, label }) => (
+              <button
+                key={id}
+                onClick={() => setIndustry(id)}
+                className={`rounded-full border px-4 py-1.5 text-[13px] font-medium transition-all ${
+                  industry === id
+                    ? "border-accent-gold bg-accent-gold/10 text-text-primary"
+                    : "border-border bg-card text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Scanners preview */}
-        {industry && (
-          <div className="rounded-2xl border border-border bg-card/60 p-5 shadow-card space-y-2 animate-fade-in">
-            <div className="text-[12px] uppercase tracking-wider text-text-muted mb-3">Scanners that will run</div>
-            <div className="flex flex-wrap gap-2">
-              {scanners.map((s) => (
-                <span
-                  key={s.id}
-                  className="flex items-center gap-1.5 rounded-full border border-border bg-chip px-3 py-1 text-[12px] text-text-secondary"
-                >
-                  <s.Icon className="h-3 w-3" strokeWidth={2} />
-                  {s.label}
-                </span>
-              ))}
-            </div>
-          </div>
+        {error && (
+          <p className="text-[13px] text-red-500 flex items-center gap-1.5">
+            <AlertTriangle className="h-4 w-4" strokeWidth={2} />
+            {error}
+          </p>
         )}
 
-        {/* Scan button */}
         <button
           onClick={handleScan}
-          disabled={!url || !industry}
-          className="flex items-center gap-2 rounded-xl bg-action-dark px-7 py-3 text-[15px] font-semibold text-white shadow-card transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex items-center gap-2 rounded-xl bg-action-dark px-6 py-3 text-[14px] font-semibold text-white shadow-card transition-all hover:opacity-90"
         >
           <Search className="h-4 w-4" strokeWidth={2.4} />
           Scan repository
           <ChevronRight className="h-4 w-4" strokeWidth={2.4} />
         </button>
 
-        {/* Disclaimer */}
-        <p className="text-[11px] text-text-muted leading-relaxed max-w-lg">
-          Only public GitHub repositories are supported. No code is executed — all analysis is static.
-          Findings are possible triggers, not legal conclusions.
+        <p className="text-[11px] text-text-muted">
+          Public GitHub repos only. Findings are indicators, not legal conclusions.
         </p>
       </div>
     );
@@ -608,69 +410,54 @@ export default function RepoScanner() {
   // ── Scanning ──────────────────────────────────────────────────────────────
 
   if (step === "scanning") {
-    return <ScanningView scanners={scanners} log={scanLog} />;
+    return (
+      <div className="space-y-8 py-4">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-accent-gold/10 border border-accent-gold/30">
+            <Loader2 className="h-7 w-7 text-accent-gold animate-spin" strokeWidth={2} />
+          </div>
+          <div>
+            <h2 className="text-[20px] font-bold text-text-primary">Scanning repository…</h2>
+            <p className="text-[13px] text-text-secondary mt-1">
+              This takes 15–60 seconds depending on repo size.
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-border bg-card p-6 shadow-card space-y-3 max-w-sm mx-auto">
+          {SCAN_STEPS.map((label, i) => {
+            const done = scanLog.includes(i);
+            const active = !done && scanLog.length === i;
+            return (
+              <div key={i} className="flex items-center gap-3">
+                {done
+                  ? <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" strokeWidth={2} />
+                  : active
+                    ? <Loader2 className="h-5 w-5 text-accent-gold shrink-0 animate-spin" strokeWidth={2} />
+                    : <div className="h-5 w-5 rounded-full border-2 border-border shrink-0" />
+                }
+                <span className={`text-[14px] ${done ? "text-text-primary font-medium" : active ? "text-accent-gold font-medium" : "text-text-muted"}`}>
+                  {label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
   }
 
   // ── Results ───────────────────────────────────────────────────────────────
 
   return (
-    <ResultsView
-      results={results}
-      repoUrl={url}
-      industry={industry}
-      onReset={handleReset}
-    />
+    <ErrorBoundary>
+      {results && (
+        <ResultsView
+          results={results}
+          repoUrl={url}
+          onReset={() => { setStep("form"); setResults(null); setError(""); setScanLog([]); }}
+        />
+      )}
+    </ErrorBoundary>
   );
 }
-
-// ── Placeholder results (shown when backend isn't connected yet) ──────────────
-
-const PLACEHOLDER_RESULTS = {
-  findings: [
-    {
-      id: "ph-1",
-      title: "GPL-3.0 dependency detected",
-      description: "One or more runtime dependencies use the GPL-3.0 license. If your product is distributed (not just SaaS), this may require review of your distribution obligations.",
-      severity: "high",
-      confidence: "high",
-      evidence: [
-        { file: "package.json", line: 14, excerpt: '"some-gpl-lib": "^2.1.0"' },
-      ],
-      recommendation: "Review whether this dependency is required at runtime. Consider alternatives with permissive licenses (MIT, Apache-2.0). Consult counsel if distributing binaries.",
-    },
-    {
-      id: "ph-2",
-      title: "Analytics SDK imported without visible consent gate",
-      description: "An analytics library (e.g. Segment, PostHog) is imported and called before user consent is collected. This may create a GDPR/CCPA trigger.",
-      severity: "medium",
-      confidence: "medium",
-      evidence: [
-        { file: "src/analytics.ts", line: 3, excerpt: "import Analytics from '@segment/analytics-next'" },
-        { file: "src/main.tsx", line: 11, excerpt: "analytics.track('page_view', { userId })" },
-      ],
-      recommendation: "Wrap analytics initialization and track calls behind a consent check. Ensure opt-out is accessible and persisted.",
-    },
-    {
-      id: "ph-3",
-      title: "No SECURITY.md found",
-      description: "The repository does not contain a SECURITY.md file. This is expected by GitHub's security advisory system and by enterprise buyers during diligence.",
-      severity: "low",
-      confidence: "high",
-      evidence: [],
-      recommendation: "Add a SECURITY.md to the repo root describing your vulnerability disclosure policy and contact method.",
-    },
-    {
-      id: "ph-4",
-      title: "Lockfile missing for declared dependencies",
-      description: "A package.json was found but no package-lock.json, yarn.lock, or pnpm-lock.yaml is committed. Without a lockfile, dependency versions are not pinned and supply chain integrity cannot be verified.",
-      severity: "medium",
-      confidence: "high",
-      evidence: [
-        { file: "package.json", excerpt: "Found, but no lockfile committed alongside it" },
-      ],
-      recommendation: "Commit your lockfile (package-lock.json or yarn.lock) and add CI checks to keep it up to date.",
-    },
-  ],
-  disclaimer:
-    "This is a placeholder result — the scanner backend is not yet connected. Findings shown are illustrative examples of what the scanner will produce. No conclusions about this specific repository should be drawn from this output.",
-};

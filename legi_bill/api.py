@@ -641,6 +641,10 @@ class RepoScanRequest(BaseModel):
     product_name: Optional[str] = None
     vuln_osv: bool = True
     outdated_registry: bool = False
+    # Optional founder questionnaire + PRD that drive the AI-tailored CustomScanner.
+    # When omitted, the custom scanner is a no-op (returns no findings).
+    questionnaire: Optional[dict] = None
+    prd_text: Optional[str] = None
 
 
 @app.post("/api/scan")
@@ -670,6 +674,8 @@ def scan_repo(req: RepoScanRequest):
             deterministic_license_only=True,
             vuln_osv=req.vuln_osv,
             outdated_registry=req.outdated_registry,
+            custom_questionnaire=req.questionnaire,
+            custom_prd_text=req.prd_text,
         )
         result = ScanEngine(
             ingestor=RepositoryIngestor(),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from startup_risk.scanners.base import InventoryScanner, Scanner
 from startup_risk.scanners.code_compliance_scanner import CodeComplianceScanner
+from startup_risk.scanners.custom_scanner import CustomScanner
 from startup_risk.scanners.dependency_scanner import DependencyRiskScanner
 from startup_risk.scanners.dependency_vuln_scanner import DependencyVulnScanner
 from startup_risk.scanners.license_scanner import LicenseRiskScanner
@@ -24,6 +25,9 @@ def default_scanners(
     license_artifact_inspection: bool = False,
     license_source_repo: bool = False,
     vuln_osv: bool = False,
+    outdated_registry: bool = True,
+    custom_questionnaire: dict | None = None,
+    custom_prd_text: str | None = None,
 ) -> list[Scanner]:
     return [
         StaticHygieneScanner(),
@@ -42,8 +46,13 @@ def default_scanners(
             enable_source_repo=license_source_repo,
         ),
         DependencyVulnScanner(enable_osv=vuln_osv),
-        OutdatedDepsScanner(),
+        OutdatedDepsScanner(enable_registry=outdated_registry),
         CodeComplianceScanner(),
+        # Opt-in: returns [] unless a questionnaire/PRD and an LLM are available.
+        CustomScanner(
+            questionnaire=custom_questionnaire,
+            prd_text=custom_prd_text,
+        ),
     ]
 
 

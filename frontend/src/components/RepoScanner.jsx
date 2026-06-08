@@ -21,6 +21,40 @@ const INDUSTRIES = [
   { id: "other",      label: "Other / General",    Icon: Layers,     desc: "General security & hygiene scan",     color: "text-text-secondary", bg: "bg-chip",    border: "border-border" },
 ];
 
+// ── Startup profile questionnaire ─────────────────────────────────────────────
+// Optional context that sharpens the AI-tailored CustomScanner's ruleset.
+// Each answer is passed straight through in the /api/scan questionnaire payload.
+
+const PROFILE_QUESTIONS = [
+  {
+    id: "stage",
+    label: "Funding stage",
+    options: ["Idea", "Pre-seed", "Seed", "Series A", "Series B+", "Growth"],
+  },
+  {
+    id: "customers",
+    label: "Primary customers",
+    options: ["Consumers", "Businesses", "Both", "Children / minors", "Government"],
+  },
+  {
+    id: "data_sensitivity",
+    label: "Most sensitive data handled",
+    options: [
+      "None / public",
+      "Personal info (PII)",
+      "Financial / payments",
+      "Health / PHI",
+      "Biometric",
+      "Children's data",
+    ],
+  },
+  {
+    id: "geography",
+    label: "Customer geography",
+    options: ["US only", "EU / UK", "Global"],
+  },
+];
+
 // ── Scanners ──────────────────────────────────────────────────────────────────
 // These match the actual scanner IDs in the backend.
 
@@ -344,6 +378,7 @@ export default function RepoScanner() {
   const [urlError, setUrlError] = useState("");
   const [industry, setIndustry] = useState(null);
   const [productName, setProductName] = useState("");
+  const [profile, setProfile] = useState({}); // startup questionnaire answers
   const [results, setResults] = useState(null);
   const [apiError, setApiError] = useState("");
   const [scanLog, setScanLog] = useState([]);
@@ -393,8 +428,9 @@ export default function RepoScanner() {
           industry,
           product_name: productName || undefined,
           // Drives the AI-tailored CustomScanner; runs automatically like the
-          // other scanners using the industry/product context already collected.
-          questionnaire: { industry, product_name: productName || undefined },
+          // other scanners using the industry/product context plus any startup
+          // profile answers the founder provided.
+          questionnaire: { industry, product_name: productName || undefined, ...profile },
         }),
       });
 
@@ -532,6 +568,45 @@ export default function RepoScanner() {
             })}
           </div>
         </div>
+
+        {/* Startup profile questionnaire — sharpens the AI-tailored scan */}
+        {industry && (
+          <div className="space-y-3 animate-fade-in">
+            <label className="text-[13px] font-medium text-text-primary flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-accent-gold" strokeWidth={2} />
+              Tell us about your startup
+              <span className="ml-1 text-text-muted font-normal text-[12px]">
+                — optional, sharpens the AI-tailored scan
+              </span>
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              {PROFILE_QUESTIONS.map(({ id, label, options }) => (
+                <div key={id} className="space-y-1.5">
+                  <label className="text-[12px] text-text-secondary">{label}</label>
+                  <select
+                    value={profile[id] ?? ""}
+                    onChange={(e) =>
+                      setProfile((prev) => {
+                        const next = { ...prev };
+                        if (e.target.value) next[id] = e.target.value;
+                        else delete next[id];
+                        return next;
+                      })
+                    }
+                    className="w-full rounded-2xl border border-border bg-card py-2.5 px-4 text-[14px] text-text-primary shadow-card outline-none focus:border-accent-gold/60 focus:ring-2 focus:ring-accent-gold/20 transition-all"
+                  >
+                    <option value="">Select…</option>
+                    {options.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Scanners preview */}
         {industry && (

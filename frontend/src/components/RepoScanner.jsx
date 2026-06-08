@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  Github, Search, ChevronRight, CheckCircle2, Circle,
+  GitBranch, Search, ChevronRight, CheckCircle2, Circle,
   AlertTriangle, XCircle, Info, Heart, DollarSign, Globe,
   BookOpen, Code2, Cpu, Building2, Layers, ArrowLeft,
   ShieldAlert, FileSearch, Package, Lock, BarChart2,
@@ -61,6 +61,23 @@ function ownerRepo(url) {
   return m ? m[1] : url;
 }
 
+function evidenceLabel(ev) {
+  const path = ev.location?.path ?? ev.file ?? ev.path ?? ev.source ?? "—";
+  const line = ev.location?.line_start ?? ev.line_start ?? ev.line;
+  return `${path}${line ? `:${line}` : ""}`;
+}
+
+function shouldUsePlaceholderResults(err) {
+  const message = String(err?.message || "");
+  return (
+    message.includes("Failed to fetch") ||
+    message.includes("404") ||
+    message.includes("502") ||
+    message.includes("ECONNREFUSED") ||
+    message.toLowerCase().includes("proxy")
+  );
+}
+
 // ── Finding card ──────────────────────────────────────────────────────────────
 
 function FindingCard({ finding }) {
@@ -108,7 +125,7 @@ function FindingCard({ finding }) {
               <div className="space-y-1">
                 {finding.evidence.map((ev, i) => (
                   <div key={i} className="flex items-start gap-2 text-[12px] text-text-secondary font-mono bg-white/60 rounded-lg px-3 py-1.5 border border-border/50">
-                    <span className="text-text-muted shrink-0">{ev.file ?? ev.source ?? "—"}{ev.line ? `:${ev.line}` : ""}</span>
+                    <span className="text-text-muted shrink-0">{evidenceLabel(ev)}</span>
                     {ev.excerpt && <span className="text-text-primary truncate">{ev.excerpt}</span>}
                   </div>
                 ))}
@@ -168,7 +185,7 @@ function ScanningView({ scanners, log }) {
 
 // ── Results view ──────────────────────────────────────────────────────────────
 
-function ResultsView({ results, repoUrl, industry, onReset }) {
+function ResultsView({ results, repoUrl, industry, onReset, onViewIssues }) {
   const findings = results.findings ?? [];
   const counts = Object.fromEntries(
     Object.keys(SEV).map((k) => [k, findings.filter((f) => f.severity === k).length])
@@ -186,7 +203,7 @@ function ResultsView({ results, repoUrl, industry, onReset }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-text-secondary text-[13px] mb-2">
-            <Github className="h-4 w-4" strokeWidth={1.5} />
+            <GitBranch className="h-4 w-4" strokeWidth={1.5} />
             <a
               href={repoUrl}
               target="_blank"
@@ -213,13 +230,24 @@ function ResultsView({ results, repoUrl, industry, onReset }) {
               : "Review each finding below. Severity and confidence are listed independently."}
           </p>
         </div>
-        <button
-          onClick={onReset}
-          className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-[13px] font-medium text-text-secondary shadow-card hover:text-text-primary transition-colors shrink-0"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2.2} />
-          New scan
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={onReset}
+            className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-[13px] font-medium text-text-secondary shadow-card hover:text-text-primary transition-colors"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2.2} />
+            New scan
+          </button>
+          {total > 0 && onViewIssues && (
+            <button
+              onClick={onViewIssues}
+              className="flex items-center gap-2 rounded-xl bg-action-dark px-4 py-2 text-[13px] font-semibold text-white shadow-card transition-opacity hover:opacity-90"
+            >
+              <Code2 className="h-3.5 w-3.5" strokeWidth={2.2} />
+              Review by file
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Severity summary strip */}
@@ -276,7 +304,7 @@ function ResultsView({ results, repoUrl, industry, onReset }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function RepoScanner() {
+export default function RepoScanner({ onScanComplete, onViewIssues }) {
   const [step, setStep] = useState("form"); // "form" | "scanning" | "results"
   const [url, setUrl] = useState("");
   const [urlError, setUrlError] = useState("");
@@ -340,11 +368,23 @@ export default function RepoScanner() {
 
       const data = await res.json();
       setResults(data);
+      onScanComplete?.({
+        results: data,
+        repoUrl: url.trim(),
+        industry,
+        productName: productName || "",
+      });
       setStep("results");
     } catch (err) {
       // If the backend isn't ready yet, show a friendly placeholder result
-      if (err.message.includes("Failed to fetch") || err.message.includes("404")) {
+      if (shouldUsePlaceholderResults(err)) {
         setResults(PLACEHOLDER_RESULTS);
+        onScanComplete?.({
+          results: PLACEHOLDER_RESULTS,
+          repoUrl: url.trim(),
+          industry,
+          productName: productName || "",
+        });
         setStep("results");
       } else {
         setApiError(err.message);
@@ -385,7 +425,7 @@ export default function RepoScanner() {
           <label className="text-[13px] font-medium text-text-primary">GitHub repository URL</label>
           <div className="flex gap-3">
             <div className="relative flex-1">
-              <Github
+              <GitBranch
                 className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted"
                 strokeWidth={1.5}
               />
@@ -516,6 +556,7 @@ export default function RepoScanner() {
       repoUrl={url}
       industry={industry}
       onReset={handleReset}
+      onViewIssues={onViewIssues}
     />
   );
 }
@@ -523,6 +564,7 @@ export default function RepoScanner() {
 // ── Placeholder results (shown when backend isn't connected yet) ──────────────
 
 const PLACEHOLDER_RESULTS = {
+  placeholder: true,
   findings: [
     {
       id: "ph-1",

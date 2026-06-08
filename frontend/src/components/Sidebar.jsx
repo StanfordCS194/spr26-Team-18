@@ -1,9 +1,10 @@
-import { Home, Scale, Sparkles, MessageCircle, Gauge, ShieldAlert } from "lucide-react";
+import { Bug, Home, Scale, Sparkles, MessageCircle, Gauge, ShieldAlert } from "lucide-react";
 import logo from "../assets/logo.png";
 
 const TABS = [
   { id: "home",    label: "Home",           Icon: Home },
   { id: "scanner", label: "Repo Scanner",   Icon: ShieldAlert },
+  { id: "issues",  label: "Issues",         Icon: Bug },
   { id: "startup", label: "Startup Health", Icon: Sparkles },
   { id: "legal",   label: "Legal",          Icon: Scale },
   { id: "recs",    label: "Recommendations", Icon: MessageCircle },

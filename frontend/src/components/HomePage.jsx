@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight, Scale, Sparkles, Gauge, MessageCircle,
-  Upload, CheckCircle2, DollarSign, FileText, ShieldAlert, Github,
+  Upload, CheckCircle2, DollarSign, FileText, GitBranch, ShieldAlert,
 } from "lucide-react";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ function useCountUp(target, duration = 1800, delay = 0) {
 const STEPS = [
   {
     n: "01",
-    Icon: Github,
+    Icon: GitBranch,
     title: "Paste a GitHub URL",
     body: "Link any public repository. No account, no install, no code execution — we read only.",
     tags: ["Public repos", "No OAuth", "Static analysis only"],
@@ -154,7 +154,7 @@ export default function HomePage({ onTabChange }) {
             onClick={() => onTabChange("scanner")}
             className="flex items-center gap-2 rounded-xl bg-action-dark px-6 py-2.5 text-[14px] font-semibold text-text-invert transition-opacity hover:opacity-90"
           >
-            <Github className="h-4 w-4" strokeWidth={2} />
+            <GitBranch className="h-4 w-4" strokeWidth={2} />
             Scan a repository
             <ArrowRight className="h-4 w-4" strokeWidth={2.4} />
           </button>

@@ -57,12 +57,15 @@ class DependencyRiskScanner:
         lockfile_index = _lockfile_index(manifest_paths)
         resolved_index = _resolved_lockfile_dependencies(dependencies)
         missing_lockfile_groups = _missing_lockfile_groups(dependencies, lockfile_index)
+        lockfile_gap_groups = _lockfile_metadata_gap_groups(dependencies)
 
         findings: list[Finding] = []
         for skipped in parsed.discovery.skipped:
             findings.append(_finding_for_skipped(skipped))
         for manifest_path, manifest_dependencies in missing_lockfile_groups.items():
             findings.append(_finding_for_missing_lockfile_group(manifest_path, manifest_dependencies))
+        for group in lockfile_gap_groups.values():
+            findings.append(_finding_for_lockfile_metadata_gap_group(group))
 
         for dependency in dependencies:
             if dependency.source_type == "metadata":
@@ -86,7 +89,7 @@ class DependencyRiskScanner:
 
             if _should_report_lockfile_metadata_gap(dependency):
                 gaps = _lockfile_metadata_gaps(dependency)
-                if gaps:
+                if gaps and self.verbose:
                     findings.append(_finding_for_lockfile_metadata_gap(dependency, gaps))
 
             if dependency.relationship == "vendored" and not has_vendored_provenance_metadata(dependency):
@@ -177,6 +180,18 @@ def _lockfile_metadata_gaps(dependency: Dependency) -> list[str]:
     if not _flag_value(dependency, "integrity"):
         gaps.append("integrity hash")
     return gaps
+
+
+def _lockfile_metadata_gap_groups(dependencies: Iterable[Dependency]) -> dict[tuple[str, str], list[Dependency]]:
+    groups: dict[tuple[str, str], list[Dependency]] = {}
+    for dependency in dependencies:
+        if not _should_report_lockfile_metadata_gap(dependency):
+            continue
+        if not _lockfile_metadata_gaps(dependency):
+            continue
+        severity = _scoped_severity(dependency, runtime="medium", dev="low")
+        groups.setdefault((dependency.source_file, severity), []).append(dependency)
+    return groups
 
 
 def _should_report_lockfile_metadata_gap(dependency: Dependency) -> bool:
@@ -317,6 +332,37 @@ def _finding_for_lockfile_metadata_gap(dependency: Dependency, gaps: list[str]) 
     )
 
 
+def _finding_for_lockfile_metadata_gap_group(dependencies: list[Dependency]) -> Finding:
+    source_file = dependencies[0].source_file
+    severity = _scoped_severity(dependencies[0], runtime="medium", dev="low")
+    runtime_count = sum(1 for dependency in dependencies if is_runtime_dependency(dependency))
+    dev_count = len(dependencies) - runtime_count
+    examples = ", ".join(dependency.name for dependency in dependencies[:10])
+    if len(dependencies) > 10:
+        examples += f", and {len(dependencies) - 10} more"
+    gap_counts: dict[str, int] = {}
+    for dependency in dependencies:
+        for gap in _lockfile_metadata_gaps(dependency):
+            gap_counts[gap] = gap_counts.get(gap, 0) + 1
+    gap_text = ", ".join(f"{gap} ({count})" for gap, count in sorted(gap_counts.items()))
+    scope_text = f"{runtime_count} runtime and {dev_count} dev/optional" if dev_count else f"{runtime_count} runtime"
+    return Finding(
+        id=stable_finding_id(SCANNER_ID, "lockfile_metadata_gap_group", f"{source_file}:{severity}"),
+        title=f"NPM lockfile entries lack resolution metadata: {source_file}",
+        description=(
+            f"{source_file} has {len(dependencies)} direct {scope_text} dependencies with incomplete lockfile "
+            f"resolution metadata. Missing fields: {gap_text}. Examples: {examples}."
+        ),
+        category="dependency_supply_chain",
+        severity=severity,  # type: ignore[arg-type]
+        confidence="medium",
+        evidence=_lockfile_gap_group_evidence(dependencies),
+        recommendation="Regenerate the lockfile with resolved artifact and integrity metadata, or document why this lockfile format intentionally omits those fields.",
+        scanner_id=SCANNER_ID,
+        scanner_version=SCANNER_VERSION,
+    )
+
+
 def _finding_for_vendored_provenance_gap(dependency: Dependency) -> Finding:
     return _dependency_finding(
         rule="vendored_provenance_gap",
@@ -414,6 +460,20 @@ def _manifest_group_evidence(dependencies: list[Dependency]) -> list[FindingEvid
             FindingEvidence(
                 location=_location(dependency.source_file, dependency.source_line),
                 description=f"{dependency.name} dependency declaration.",
+                excerpt=_bounded_excerpt(_dependency_spec(dependency)),
+            )
+        )
+    return evidence
+
+
+def _lockfile_gap_group_evidence(dependencies: list[Dependency]) -> list[FindingEvidence]:
+    evidence = []
+    for dependency in dependencies[:12]:
+        gaps = ", ".join(_lockfile_metadata_gaps(dependency))
+        evidence.append(
+            FindingEvidence(
+                location=_location(dependency.source_file, dependency.source_line),
+                description=f"{dependency.name} lockfile entry is missing {gaps}.",
                 excerpt=_bounded_excerpt(_dependency_spec(dependency)),
             )
         )

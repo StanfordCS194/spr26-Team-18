@@ -161,11 +161,25 @@ def test_npm_lockfile_metadata_gap_is_calibrated_by_scope():
 
     findings = DependencyRiskScanner().scan(snap)
 
-    runtime = [finding for finding in findings if "runtime-lib" in finding.title][0]
-    dev = [finding for finding in findings if "dev-lib" in finding.title][0]
-    assert runtime.severity == "medium"
-    assert dev.severity == "low"
+    runtime = [
+        finding
+        for finding in findings
+        if finding.title == "NPM lockfile entries lack resolution metadata: package-lock.json"
+        and finding.severity == "medium"
+    ][0]
+    dev = [
+        finding
+        for finding in findings
+        if finding.title == "NPM lockfile entries lack resolution metadata: package-lock.json"
+        and finding.severity == "low"
+    ][0]
+    assert "runtime-lib" in runtime.description
+    assert "dev-lib" in dev.description
     assert not any("transitive-lib" in finding.title for finding in findings)
+
+    verbose_findings = DependencyRiskScanner(verbose=True).scan(snap)
+    assert any("runtime-lib" in finding.title and "resolution metadata" in finding.title for finding in verbose_findings)
+    assert any("dev-lib" in finding.title and "resolution metadata" in finding.title for finding in verbose_findings)
 
 
 def test_vendored_package_metadata_does_not_require_local_lockfile_or_pinned_specs():

@@ -92,6 +92,18 @@ def scan(
         bool,
         typer.Option("--license-only", help="Run only the license scanner, excluding repository hygiene findings."),
     ] = False,
+    vuln_osv: Annotated[
+        bool,
+        typer.Option("--vuln-osv", help="Query the OSV vulnerability database for known CVEs in pinned dependencies."),
+    ] = False,
+    outdated_registry: Annotated[
+        bool,
+        typer.Option("--outdated-registry", help="Check PyPI / npm / crates.io / RubyGems for outdated pinned dependency versions."),
+    ] = False,
+    outdated_max_per_ecosystem: Annotated[
+        int,
+        typer.Option("--outdated-max-per-ecosystem", help="Maximum packages checked per ecosystem when --outdated-registry is set."),
+    ] = 30,
 ) -> None:
     """Scan a repository using static parsing only."""
     console = Console()
@@ -123,6 +135,9 @@ def scan(
             license_registry_metadata=license_registry_metadata,
             license_artifact_inspection=license_artifact_inspection,
             license_source_repo=license_source_repo,
+            vuln_osv=vuln_osv,
+            outdated_registry=outdated_registry,
+            outdated_max_per_ecosystem=outdated_max_per_ecosystem,
         )
     )
     engine = ScanEngine(

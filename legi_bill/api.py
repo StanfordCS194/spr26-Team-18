@@ -631,3 +631,101 @@ def legal_savings(
         state=state,
         hourly_rate_override=hourly_rate,
     )
+
+
+# ── /api/scan ─────────────────────────────────────────────────────────────────
+
+class RepoScanRequest(BaseModel):
+    repo_url: str
+    industry: Optional[str] = None
+    product_name: Optional[str] = None
+    vuln_osv: bool = True
+    outdated_registry: bool = False
+
+
+@app.post("/api/scan")
+def scan_repo(req: RepoScanRequest):
+    """Run all startup-risk scanners on a public GitHub repository."""
+    import time
+    import re as _re
+
+    startup_risk_root = Path(__file__).resolve().parents[1] / "startup-risk"
+    if str(startup_risk_root) not in sys.path:
+        sys.path.insert(0, str(startup_risk_root))
+
+    try:
+        from startup_risk.core.engine import ScanEngine
+        from startup_risk.ingest.repository import RepositoryIngestor
+        from startup_risk.scanners.registry import default_scanners
+    except ImportError as exc:
+        raise HTTPException(500, f"startup-risk module not available: {exc}") from exc
+
+    # Validate: public GitHub HTTPS URL only
+    if not _re.match(r"^https://github\.com/[\w.\-]+/[\w.\-]+(/?)?$", req.repo_url.strip()):
+        raise HTTPException(400, "Only public GitHub HTTPS URLs are supported.")
+
+    start = time.time()
+    try:
+        scanners = default_scanners(
+            deterministic_license_only=True,
+            vuln_osv=req.vuln_osv,
+            outdated_registry=req.outdated_registry,
+        )
+        result = ScanEngine(
+            ingestor=RepositoryIngestor(),
+            scanners=scanners,
+        ).scan(req.repo_url.strip())
+    except Exception as exc:
+        raise HTTPException(502, f"Scan failed: {exc}") from exc
+
+    elapsed = round(time.time() - start, 1)
+
+    # Transform Finding objects into the frontend-expected shape
+    def _finding_to_dict(f) -> dict:
+        evidence = []
+        for ev in (f.evidence or []):
+            loc = ev.location
+            evidence.append({
+                "file": loc.path if loc else None,
+                "line": loc.line_start if loc else None,
+                "excerpt": ev.excerpt or ev.description,
+            })
+        return {
+            "id": f.id,
+            "title": f.title,
+            "description": f.description,
+            "category": f.category,
+            "severity": f.severity,
+            "confidence": f.confidence,
+            "evidence": evidence,
+            "recommendation": f.recommendation,
+            "scanner": f.scanner_id,
+        }
+
+    findings = [_finding_to_dict(f) for f in result.findings]
+
+    # Trivy comparison metadata — precomputed from our benchmark run
+    _TRIVY_KNOWN = {
+        "django/django": {
+            "trivy_findings": 0,
+            "trivy_vulns": 0,
+            "trivy_secrets": 0,
+            "trivy_note": "Trivy scanned django/django and found 0 vulnerabilities. It missed GHSA-27jp-wm6q-gp25 because its uv lockfile parser does not read optional dependencies declared in pyproject.toml.",
+        },
+    }
+    slug = "/".join(req.repo_url.strip().rstrip("/").split("/")[-2:])
+    trivy_comparison = _TRIVY_KNOWN.get(slug)
+
+    our_vulns = sum(1 for f in findings if f["category"] == "dependency_vulnerability")
+    our_secrets = sum(1 for f in findings if f["category"] == "secret_exposure")
+
+    return {
+        "repo": slug,
+        "findings": findings,
+        "summary": result.summary.model_dump(),
+        "timing_seconds": elapsed,
+        "scanners_run": list({f["scanner"] for f in findings}),
+        "trivy_comparison": trivy_comparison,
+        "our_vuln_count": our_vulns,
+        "our_secret_count": our_secrets,
+    }

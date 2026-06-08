@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from startup_risk.scanners.base import InventoryScanner, Scanner
 from startup_risk.scanners.code_compliance_scanner import CodeComplianceScanner
+from startup_risk.scanners.dependency_scanner import DependencyRiskScanner
 from startup_risk.scanners.dependency_vuln_scanner import DependencyVulnScanner
 from startup_risk.scanners.license_scanner import LicenseRiskScanner
 from startup_risk.scanners.outdated_deps_scanner import OutdatedDepsScanner
@@ -26,6 +27,7 @@ def default_scanners(
 ) -> list[Scanner]:
     return [
         StaticHygieneScanner(),
+        DependencyRiskScanner(),
         SecretScanner(),
         LicenseRiskScanner(
             deterministic_only=deterministic_license_only,

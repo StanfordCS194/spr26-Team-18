@@ -11,6 +11,7 @@ from startup_risk.core.engine import ScanEngine
 from startup_risk.ingest.repository import RepositoryIngestor
 from startup_risk.outputs.json_output import result_to_json
 from startup_risk.outputs.text_output import render_text
+from startup_risk.scanners.dependency_scanner import DependencyRiskScanner
 from startup_risk.scanners.license_scanner import LicenseRiskScanner
 from startup_risk.scanners.registry import default_scanners
 
@@ -92,6 +93,14 @@ def scan(
         bool,
         typer.Option("--license-only", help="Run only the license scanner, excluding repository hygiene findings."),
     ] = False,
+    dependency_only: Annotated[
+        bool,
+        typer.Option("--dependency-only", help="Run only the dependency supply-chain scanner."),
+    ] = False,
+    dependency_verbose: Annotated[
+        bool,
+        typer.Option("--dependency-verbose", help="Include verbose dependency-level hygiene findings."),
+    ] = False,
     vuln_osv: Annotated[
         bool,
         typer.Option("--vuln-osv", help="Query the OSV vulnerability database for known CVEs in pinned dependencies."),
@@ -99,9 +108,13 @@ def scan(
 ) -> None:
     """Scan a repository using static parsing only."""
     console = Console()
+    if license_only and dependency_only:
+        raise typer.BadParameter("--license-only and --dependency-only cannot be used together.")
     ingestor = RepositoryIngestor(max_file_bytes=max_file_bytes)
-    scanners = (
-        [
+    if dependency_only:
+        scanners = [DependencyRiskScanner(verbose=dependency_verbose)]
+    elif license_only:
+        scanners = [
             LicenseRiskScanner(
                 deterministic_only=deterministic_only,
                 provider_name=license_llm_provider.value if license_llm_provider else None,
@@ -115,8 +128,8 @@ def scan(
                 enable_source_repo=license_source_repo,
             )
         ]
-        if license_only
-        else default_scanners(
+    else:
+        scanners = default_scanners(
             deterministic_license_only=deterministic_only,
             license_llm_provider=license_llm_provider.value if license_llm_provider else None,
             license_batch_timeout_seconds=int(license_batch_timeout_hours * 60 * 60),
@@ -129,7 +142,6 @@ def scan(
             license_source_repo=license_source_repo,
             vuln_osv=vuln_osv,
         )
-    )
     engine = ScanEngine(
         ingestor=ingestor,
         scanners=scanners,

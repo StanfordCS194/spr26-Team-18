@@ -63,7 +63,7 @@ def _parse_cargo_toml(file: FileSnapshot) -> list[Dependency]:
                     ],
                 )
             )
-    if file.path == "Cargo.toml" and (package_name or package_license):
+    if package_name or package_license:
         dependencies.append(
             Dependency(
                 name=package_name or "(rust project)",

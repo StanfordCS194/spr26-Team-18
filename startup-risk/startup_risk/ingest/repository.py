@@ -28,6 +28,7 @@ STRUCTURED_DEPENDENCY_FILES = {
     "cargo.lock",
     "poetry.lock",
     "pipfile.lock",
+    "uv.lock",
     "composer.lock",
     "packages.lock.json",
 }

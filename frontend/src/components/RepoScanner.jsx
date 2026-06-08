@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  Github, Search, ChevronRight, CheckCircle2, Circle,
+  GitBranch, Search, ChevronRight, CheckCircle2, Circle,
   AlertTriangle, XCircle, Info, Heart, DollarSign, Globe,
   BookOpen, Code2, Cpu, Building2, Layers, ArrowLeft,
   ShieldAlert, FileSearch, Package, Lock, BarChart2,
@@ -239,7 +239,7 @@ function ResultsView({ results, repoUrl, industry, onReset }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-text-secondary text-[13px] mb-2">
-            <Github className="h-4 w-4" strokeWidth={1.5} />
+            <GitBranch className="h-4 w-4" strokeWidth={1.5} />
             <a
               href={repoUrl}
               target="_blank"
@@ -448,7 +448,7 @@ export default function RepoScanner() {
           <label className="text-[13px] font-medium text-text-primary">GitHub repository URL</label>
           <div className="flex gap-3">
             <div className="relative flex-1">
-              <Github
+              <GitBranch
                 className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted"
                 strokeWidth={1.5}
               />

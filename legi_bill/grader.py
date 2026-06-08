@@ -12,10 +12,8 @@ import json
 from datetime import datetime, timezone
 from typing import Iterable, Tuple
 
-from openai import OpenAI
-
 from app.ranking import rank_bills
-from .config import OPENAI_MODEL
+from .llm import ChatClient
 from .models import Bill
 
 AXES = ("emissions", "water", "packaging", "labor", "disclosure")
@@ -148,7 +146,7 @@ def _composite_and_letter(axes: dict) -> tuple[int, str]:
 
 
 def grade_company(
-    client: OpenAI,
+    client: ChatClient,
     bills_with_summary: Iterable[Tuple[Bill, str]],
     company_text: str,
     company_name: str | None = None,
@@ -211,8 +209,7 @@ def grade_company(
         f"{_format_bills_for_prompt(top_bills)}"
     )
 
-    response = client.chat.completions.create(
-        model=OPENAI_MODEL,
+    response = client.complete(
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
@@ -221,7 +218,7 @@ def grade_company(
         temperature=0.3,
     )
 
-    raw = response.choices[0].message.content or "{}"
+    raw = response.content or "{}"
     parsed = json.loads(raw)
 
     # Validate + fill defaults; trust nothing from the LLM.

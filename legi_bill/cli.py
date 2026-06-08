@@ -2,10 +2,10 @@ import json
 import sys
 from datetime import datetime
 
-from openai import OpenAI
 import click
 
 from .config import load_config, ENVIRONMENTAL_KEYWORDS, ENVIRONMENTAL_SUBJECTS
+from .llm import get_chat_client
 from .scraper import scrape_environmental_bills, fetch_specific_bills
 from .storage import (
     init_db,
@@ -64,14 +64,16 @@ def scrape_bills_cmd(bill_numbers):
 @click.option("--bill", "bill_number", default=None, help="Process a single bill, e.g. AB1234")
 @click.option("--all", "process_all", is_flag=True, help="Process all unsummarized bills")
 @click.option("--force", is_flag=True, help="Re-summarize even if summary already exists")
-def summarize_cmd(bill_number, process_all, force):
+@click.option("--llm-provider", default=None, help="Override LLM provider: openai, anthropic, or gemini.")
+@click.option("--llm-model", default=None, help="Override LLM model for this run.")
+def summarize_cmd(bill_number, process_all, force, llm_provider, llm_model):
     """Generate LLM summaries and compliance questions for bills."""
     if not bill_number and not process_all:
         raise click.UsageError("Provide --bill <number> or --all.")
 
     cfg = load_config()
     conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
-    client = OpenAI(api_key=cfg["openai_api_key"])
+    client = get_chat_client(provider=llm_provider, model=llm_model)
 
     if bill_number:
         bill = get_bill_by_number(conn, bill_number)

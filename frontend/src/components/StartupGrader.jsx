@@ -37,6 +37,7 @@ const RADAR_LABELS = {
   financial: "Finance",
   compliance: "Compliance",
   product: "Product",
+  custom: "Custom",
 };
 
 // Which axes each input contributes to. Used for empty-state coaching.
@@ -44,7 +45,20 @@ const INPUT_AXIS_MAP = {
   github: ["engineering", "legal"],
   prd: ["legal", "compliance", "product"],
   spreadsheet: ["financial"],
+  questionnaire: ["custom"],
 };
+
+const EMPTY_QUESTIONNAIRE = {
+  stage: "",
+  customers: "",
+  sensitive_data: "",
+  regulated_industry: "",
+  gtm: "",
+};
+
+function questionnaireFilled(q) {
+  return !!q && Object.values(q).some((v) => (v || "").trim());
+}
 
 const LAST_GRADE_KEY = "startupGrader.lastGrade.v1";
 export const STARTUP_RECOMMENDATIONS_KEY = "startupGrader.latestRecommendations.v1";
@@ -122,6 +136,7 @@ export default function StartupGrader({ onRecommendationsUpdated }) {
   const [githubUrl, setGithubUrl] = useState("");
   const [prdFile, setPrdFile] = useState(null);
   const [sheetFile, setSheetFile] = useState(null);
+  const [questionnaire, setQuestionnaire] = useState(EMPTY_QUESTIONNAIRE);
 
   // State machine: idle | scanning | scoring | revealed
   const [step, setStep] = useState("idle");
@@ -150,6 +165,7 @@ export default function StartupGrader({ onRecommendationsUpdated }) {
     setError(null);
     setScanLog([]);
     setVerdict({ state: "idle" });
+    setQuestionnaire(EMPTY_QUESTIONNAIRE);
   }
 
   async function fetchVerdict(scored, name) {
@@ -208,7 +224,7 @@ export default function StartupGrader({ onRecommendationsUpdated }) {
 
   async function runGrade(opts = {}) {
     if (working) return;
-    const { presetFeatures, presetName } = opts;
+    const { presetFeatures, presetName, presetCustomAxis } = opts;
     setWorking(true);
     setError(null);
     setStep("scanning");
@@ -258,10 +274,60 @@ export default function StartupGrader({ onRecommendationsUpdated }) {
 
       pushLog(`Running rubric · ${RULES.length} rules across 5 axes`);
       await wait(380);
-      const scored = scoreFeatures(features);
+
+      // Optional 6th axis: LLM writes custom rules from the questionnaire +
+      // PRD, then LLM grades the repo/PRD against them. Only runs when the
+      // user filled in the questionnaire — presets skip this entirely.
+      let customAxis = null;
+      if (!presetFeatures && questionnaireFilled(questionnaire)) {
+        try {
+          pushLog("Writing custom rules · LLM tailoring to your product");
+          const rulesResp = await fetch("/api/startup/custom-rules", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              questionnaire,
+              prd_text: features.prd?.text || null,
+              github_summary: features.github || null,
+            }),
+          });
+          if (rulesResp.status === 503) {
+            pushLog("⚠ custom scan skipped — backend missing OPENAI_API_KEY");
+          } else if (!rulesResp.ok) {
+            const d = await rulesResp.json().catch(() => ({}));
+            pushLog(`⚠ rule generation failed: ${d.detail || rulesResp.status}`);
+          } else {
+            const { rules } = await rulesResp.json();
+            pushLog(`✓ ${rules.length} custom rules written`);
+            pushLog("Grading repo against custom rules");
+            const gradeResp = await fetch("/api/startup/custom-grade", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                rules,
+                prd_text: features.prd?.text || null,
+                github_summary: features.github || null,
+                spreadsheet_summary: features.spreadsheet || null,
+              }),
+            });
+            if (gradeResp.ok) {
+              const { results } = await gradeResp.json();
+              customAxis = { results };
+              const passed = results.filter((r) => r.passed).length;
+              pushLog(`✓ Custom axis · ${passed}/${results.length} rules passed`);
+            } else {
+              const d = await gradeResp.json().catch(() => ({}));
+              pushLog(`⚠ custom grading failed: ${d.detail || gradeResp.status}`);
+            }
+          }
+        } catch (e) {
+          pushLog(`⚠ custom scan errored: ${e.message || e}`);
+        }
+      }
+
+      const scored = scoreFeatures(features, customAxis || presetCustomAxis);
       const name = presetName || nameFromInputs(features);
-      saveCompanyContext(name, features);
-      setResult({ features, ...scored, name });
+      setResult({ features, ...scored, name, hasCustom: !!(customAxis || presetCustomAxis) });
       pushLog(`✓ Composite ${scored.composite}/100 · grade ${scored.grade}`);
       await wait(400);
 
@@ -345,7 +411,11 @@ export default function StartupGrader({ onRecommendationsUpdated }) {
     const presets = buildPresets();
     const target = presets.find((p) => p.key === demo.toLowerCase());
     if (target) {
-      runGrade({ presetFeatures: target.features, presetName: target.name });
+      runGrade({
+        presetFeatures: target.features,
+        presetName: target.name,
+        presetCustomAxis: target.customAxis,
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -368,7 +438,7 @@ export default function StartupGrader({ onRecommendationsUpdated }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, working, githubUrl, prdFile, sheetFile]);
+  }, [step, working, githubUrl, prdFile, sheetFile, questionnaire]);
 
   return (
     <section className="space-y-8">
@@ -399,7 +469,9 @@ export default function StartupGrader({ onRecommendationsUpdated }) {
           Drop in your <span className="font-medium text-text-primary">GitHub repo</span>, a{" "}
           <span className="font-medium text-text-primary">PRD</span>, and a{" "}
           <span className="font-medium text-text-primary">finance spreadsheet</span>. We score 5
-          axes against {RULES.length} rules and tell you the 5 highest-leverage things to fix this week.
+          axes against 35 rules — and, if you fill out the{" "}
+          <span className="font-medium text-text-primary">custom scan</span>, an LLM writes a 6th
+          axis of rules tailored to your product. We surface the top 5 things to fix this week.
         </p>
         {methodologyOpen && <Methodology />}
       </header>
@@ -416,13 +488,21 @@ export default function StartupGrader({ onRecommendationsUpdated }) {
             setPrdFile={setPrdFile}
             sheetFile={sheetFile}
             setSheetFile={setSheetFile}
+            questionnaire={questionnaire}
+            setQuestionnaire={setQuestionnaire}
             onSubmit={() => runGrade()}
             working={working}
             error={error}
           />
           <PresetRow
             disabled={working}
-            onPick={(p) => runGrade({ presetFeatures: p.features, presetName: p.name })}
+            onPick={(p) =>
+              runGrade({
+                presetFeatures: p.features,
+                presetName: p.name,
+                presetCustomAxis: p.customAxis,
+              })
+            }
           />
         </>
       )}
@@ -482,9 +562,9 @@ function LegalSavingsTeaser({ name }) {
 function Footer() {
   return (
     <footer className="pt-6 text-[11px] leading-relaxed text-text-muted">
-      v0.1 prototype · {RULES.length} deterministic rules · GitHub extraction is a live API call ·
-      PRD + CSV parsed deterministically · LLM verdict synthesized server-side from the
-      structured grade (not the raw inputs).
+      v0.1 prototype · {RULES.length} deterministic rules · optional LLM-tailored custom axis ·
+      GitHub extraction is a live API call · PRD + CSV parsed in your browser · LLM verdict
+      synthesized server-side from the structured grade (not the raw inputs).
     </footer>
   );
 }
@@ -509,13 +589,16 @@ function InputPanel({
   setPrdFile,
   sheetFile,
   setSheetFile,
+  questionnaire,
+  setQuestionnaire,
   onSubmit,
   working,
   error,
 }) {
   const prdRef = useRef(null);
   const sheetRef = useRef(null);
-  const ready = githubUrl.trim() || prdFile || sheetFile;
+  const ready =
+    githubUrl.trim() || prdFile || sheetFile || questionnaireFilled(questionnaire);
 
   return (
     <form
@@ -525,7 +608,7 @@ function InputPanel({
       }}
       className="space-y-4"
     >
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-4">
         <InputCard
           Icon={FileText}
           title="GitHub repo"
@@ -580,6 +663,19 @@ function InputPanel({
           />
           <div className="mt-2 text-[11px] text-text-muted">
             Computes runway, burn, revenue, top expense.
+          </div>
+        </InputCard>
+
+        <InputCard
+          Icon={Sparkles}
+          title="Custom scan (AI)"
+          subtitle="LLM writes & grades rules tailored to your product"
+          unlocks="unlocks a 6th axis sized to YOUR product"
+          filled={questionnaireFilled(questionnaire)}
+        >
+          <QuestionnaireFields value={questionnaire} onChange={setQuestionnaire} />
+          <div className="mt-2 text-[11px] text-text-muted">
+            Adds ~5s. Uses your PRD + repo as evidence.
           </div>
         </InputCard>
       </div>
@@ -712,53 +808,136 @@ function truncate(s, n) {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
+const QUESTIONNAIRE_FIELDS = [
+  {
+    key: "stage",
+    label: "Stage",
+    options: ["idea", "pre-seed", "seed", "series A+"],
+  },
+  {
+    key: "customers",
+    label: "Customer",
+    options: ["consumer", "SMB", "mid-market", "enterprise", "developer"],
+  },
+  {
+    key: "sensitive_data",
+    label: "Sensitive data",
+    options: ["none", "PII", "health (HIPAA)", "financial", "minors"],
+  },
+  {
+    key: "regulated_industry",
+    label: "Industry",
+    options: ["general SaaS", "fintech", "healthtech", "edtech", "govtech", "AI/ML"],
+  },
+  {
+    key: "gtm",
+    label: "Go-to-market",
+    options: ["self-serve", "PLG", "sales-led", "marketplace", "API"],
+  },
+];
+
+function QuestionnaireFields({ value, onChange }) {
+  function set(k, v) {
+    onChange({ ...value, [k]: v });
+  }
+  return (
+    <div className="grid grid-cols-1 gap-1.5">
+      {QUESTIONNAIRE_FIELDS.map((f) => (
+        <label key={f.key} className="flex items-center gap-2 text-[11px]">
+          <span className="w-[78px] text-text-muted">{f.label}</span>
+          <select
+            value={value[f.key] || ""}
+            onChange={(e) => set(f.key, e.target.value)}
+            className="flex-1 rounded-lg border border-border bg-card px-2 py-1 text-[12px] text-text-primary focus:border-action-dark focus:outline-none"
+          >
+            <option value="">—</option>
+            {f.options.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 // ──────────────────────────── Presets ────────────────────────────
 
-const PRESET_PRD_GOOD = `# Founder Copilot — PRD
+const PRESET_PRD_NEXTJS = `# Next.js — Hybrid React framework
 
 ## Problem
-Today, pre-seed founders waste ~15 hrs/week on legal, financial, and admin tasks
-they don't understand. Currently they either ignore the work or hire too early.
+Today, React teams spend weeks wiring up SSR, routing, image optimization, and
+bundling before they write the first line of product code.
 
 ## Target user
-2-3 person YC pre-seed founder, US Delaware C-corp, building SaaS or AI.
-
-## Solution
-A copilot that ingests GitHub, PRD, and Mercury CSV, then grades the startup
-across 5 dimensions and surfaces the 5 highest-leverage actions weekly.
+Mid-market product engineers shipping consumer SaaS on a 2-3 person frontend team.
 
 ## Success metrics
-North star: weekly active founders. Input metrics: time-to-first-grade,
-% of recommendations acted on within 7 days, retention week 4.
+Weekly active builds, time-to-first-deploy < 10min, retention week 4 (north star).
 
 ## Scope
-Out of scope: tax filing, payroll, equity issuance.
-Non-goals: replacing a real lawyer for term sheet negotiation.
-
-## Timeline
-Q1 2026: Internal alpha. Q2 2026: 10 design partners.
+Out of scope: native mobile, server runtime outside Node/Edge.
 
 ## Compliance
-US-only at launch (defer GDPR). CCPA-compliant from day 1 since we'll have CA users.
-We will publish a Privacy Policy and Terms of Service. Authentication via Google OAuth.
-PII handling: encrypted at rest, deleted on user request (data retention: 90 days post-cancel).
-SOC2 Type 1 targeted by Q4 2026.
-
-## Competition
-Carta does cap tables. Pilot does books. Stripe Atlas does formation. None do all three
-with active recommendations. Status quo is a Notion doc + 3 lawyers.
+US + EU launch. GDPR-compliant: no PII collected by the framework itself.
+Privacy Policy on nextjs.org. Terms of Service on Vercel platform.
+Authentication delegated to host application (OAuth/SSO supported).
 
 ## Entity
-Founder Copilot, Inc. (Delaware C-corp, formed via Clerky).
+Vercel, Inc. (Delaware C-corp).
+
+## Competition
+Remix, Astro, SvelteKit. Status quo is hand-rolled CRA + Webpack.
+
+## Timeline
+Q1 2026 stable App Router. Q3 2026 React 19 GA.
 `;
 
-const PRESET_PRD_BAD = `# Cool app idea
+const PRESET_PRD_PLAID = `# Plaid-style API for SMB banking
 
-We're building an AI thing for kids that's super viral. It's like ChatGPT but for
-TikTok. Users will love it. We'll make money somehow.
+## Problem
+Small banks can't compete because they can't ship account-linking infrastructure.
+We expose a unified API to query accounts, transactions, and balances.
+
+## Target user
+SMB-focused regional banks and fintech apps building money movement products.
+
+## Solution
+REST + webhook API over Plaid-style data normalization. Stores account numbers and
+transaction history (PII + financial data).
+
+## Compliance
+US-only at launch. We will publish a Privacy Policy.
+
+## Entity
+PaymentRails, Inc. (Delaware C-corp).
 `;
 
-const PRESET_CSV_GOOD = `date,amount,category,balance
+const PRESET_PRD_KIDPALS = `# KidPals
+
+AI chat for kids ages 8-12. Super viral. Users will love it.
+We'll figure out monetization later.
+`;
+
+const PRESET_PRD_LANGCHAIN = `# LangChain-style RAG framework
+
+## Problem
+AI app builders re-invent the same plumbing: chunking, embeddings, retrievers,
+prompt templates, agent loops.
+
+## Target user
+Developers building LLM applications — solo hackers up to enterprise AI teams.
+
+## Solution
+Composable abstractions for chains, agents, retrievers, and memory. Python + JS.
+
+## Competition
+LlamaIndex, Haystack, direct OpenAI SDK use.
+`;
+
+const PRESET_CSV_HEALTHY = `date,amount,category,balance
 2025-09-01,-12500,payroll,400000
 2025-09-15,8000,revenue,408000
 2025-10-01,-13200,payroll,394800
@@ -773,32 +952,41 @@ const PRESET_CSV_GOOD = `date,amount,category,balance
 2026-02-15,16200,revenue,399700
 `;
 
-const PRESET_CSV_BAD = `transaction,price
+const PRESET_CSV_THIN = `date,amount,balance
+2025-12-01,-22000,110000
+2026-01-01,-23000,87000
+2026-02-01,-24000,63000
+`;
+
+const PRESET_CSV_BROKEN = `transaction,price
 "coffee",4.50
 "uber",18.00
 "slack",12.00
 `;
 
+// Each preset can ship a baked `customAxis` so the 6-axis radar renders even
+// though presets skip the live LLM call. These are illustrative — what an
+// LLM-generated industry-tailored ruleset would plausibly look like.
 function buildPresets() {
   return [
     {
-      key: "good",
-      name: "Founder Copilot, Inc. (well-run)",
-      blurb: "Tight repo · complete PRD · 13mo runway",
+      key: "nextjs",
+      name: "Next.js (Vercel) — A grade",
+      blurb: "Real repo · complete PRD · 13mo runway · clean across the board",
       features: {
         github: {
-          fullName: "founder-copilot/copilot",
-          owner: "founder-copilot",
-          repo: "copilot",
-          description: "Founder copilot for legal/finance/ops",
-          license: "Apache-2.0",
-          language: "TypeScript",
-          stars: 142,
-          pushedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-          daysSincePush: 2,
-          filenames: ["README.md", "LICENSE", "package.json", "tests", ".gitignore", ".github"],
-          readmeText: "x".repeat(2400),
-          readmeLength: 2400,
+          fullName: "vercel/next.js",
+          owner: "vercel",
+          repo: "next.js",
+          description: "The React Framework",
+          license: "MIT",
+          language: "JavaScript",
+          stars: 128000,
+          pushedAt: new Date(Date.now() - 1 * 86400000).toISOString(),
+          daysSincePush: 1,
+          filenames: ["README.md", "LICENSE", "package.json", "test", ".gitignore", ".github", "CONTRIBUTING.md"],
+          readmeText: "x".repeat(8500),
+          readmeLength: 8500,
           hasReadme: true,
           hasLicense: true,
           hasGitignore: true,
@@ -806,59 +994,72 @@ function buildPresets() {
           hasTests: true,
           hasEnvFile: false,
           hasCI: true,
-          contributorCount: 4,
+          contributorCount: 10,
         },
-        prd: analyzePRD(PRESET_PRD_GOOD, "PRD.md"),
-        spreadsheet: analyzeCSV(PRESET_CSV_GOOD, "mercury_export.csv"),
+        prd: analyzePRD(PRESET_PRD_NEXTJS, "PRD.md"),
+        spreadsheet: analyzeCSV(PRESET_CSV_HEALTHY, "mercury_export.csv"),
+      },
+      customAxis: {
+        results: [
+          { id: "framework_versioning", title: "Public versioning policy documented", weight: 10, passed: true, observed: "App Router + React 19 milestones in PRD", fix: "" },
+          { id: "plugin_api_docs", title: "Extension/plugin API documented", weight: 8, passed: true, observed: "README references plugin surface", fix: "" },
+          { id: "lts_policy", title: "LTS / deprecation policy", weight: 8, passed: false, observed: "PRD does not state LTS commitments", fix: "Publish a major-version LTS window so framework consumers can plan upgrades." },
+          { id: "telemetry_optout", title: "Telemetry opt-out for users of the framework", weight: 6, passed: true, observed: "GDPR-compliant; no PII collected", fix: "" },
+          { id: "perf_budget", title: "Performance regression budget on PRs", weight: 8, passed: true, observed: "CI present; assume bundle-size checks", fix: "" },
+        ],
       },
     },
     {
-      key: "ok",
-      name: "Bolt SaaS (mid)",
-      blurb: "Decent repo · thin PRD · 5mo runway",
+      key: "plaid",
+      name: "Plaid-style SMB banking API",
+      blurb: "Real fintech repo · thin PRD · 5mo runway · custom axis fires hard",
       features: {
         github: {
-          fullName: "boltsaas/api",
-          owner: "boltsaas",
-          repo: "api",
-          description: "B2B SaaS API",
+          fullName: "plaid/plaid-node",
+          owner: "plaid",
+          repo: "plaid-node",
+          description: "Node client library for Plaid API",
           license: "MIT",
-          language: "Python",
-          stars: 12,
-          pushedAt: new Date(Date.now() - 18 * 86400000).toISOString(),
-          daysSincePush: 18,
-          filenames: ["README.md", "LICENSE", "requirements.txt", ".gitignore"],
-          readmeText: "x".repeat(450),
-          readmeLength: 450,
+          language: "TypeScript",
+          stars: 1800,
+          pushedAt: new Date(Date.now() - 6 * 86400000).toISOString(),
+          daysSincePush: 6,
+          filenames: ["README.md", "LICENSE", "package.json", "test", ".gitignore", ".github"],
+          readmeText: "x".repeat(2200),
+          readmeLength: 2200,
           hasReadme: true,
           hasLicense: true,
           hasGitignore: true,
           hasPackageManifest: true,
-          hasTests: false,
+          hasTests: true,
           hasEnvFile: false,
-          hasCI: false,
-          contributorCount: 2,
+          hasCI: true,
+          contributorCount: 8,
         },
-        prd: analyzePRD(
-          `# Bolt SaaS PRD\n\nProblem: companies need an API. Solution: we build one.\nTarget user: B2B teams. We'll add auth.\n`,
-          "PRD.md"
-        ),
-        spreadsheet: analyzeCSV(
-          `date,amount,balance\n2025-12-01,-22000,110000\n2026-01-01,-23000,87000\n2026-02-01,-24000,63000\n`,
-          "books.csv"
-        ),
+        prd: analyzePRD(PRESET_PRD_PLAID, "PRD.md"),
+        spreadsheet: analyzeCSV(PRESET_CSV_THIN, "books.csv"),
+      },
+      customAxis: {
+        results: [
+          { id: "pci_scope", title: "PCI-DSS scope statement", weight: 18, passed: false, observed: "PRD stores account numbers but does not declare PCI scope", fix: "Document whether you store PAN. If yes, you need PCI-DSS Level 1–4 attestation." },
+          { id: "encryption_at_rest", title: "Encryption-at-rest claim for financial PII", weight: 14, passed: false, observed: "no encryption posture in PRD", fix: "State AES-256 at rest + KMS-managed keys before sales conversations with banks." },
+          { id: "audit_logging", title: "Immutable audit logs for account access", weight: 12, passed: false, observed: "no audit log mention", fix: "Banks will require append-only access logs for every account/transaction read." },
+          { id: "ffiec_aligned", title: "FFIEC / GLBA alignment mentioned", weight: 10, passed: false, observed: "no regulatory framework named", fix: "If your customers are US banks, FFIEC IT exam handbook applies transitively." },
+          { id: "key_rotation", title: "Customer-facing key rotation policy", weight: 8, passed: true, observed: "Plaid-style API likely already supports key rotation", fix: "" },
+          { id: "webhook_signing", title: "Signed webhooks", weight: 6, passed: true, observed: "standard for fintech APIs at this maturity", fix: "" },
+        ],
       },
     },
     {
-      key: "bad",
-      name: "Friction Labs (vibe-coded)",
-      blurb: "AGPL · no tests · runway unknown · COPPA risk",
+      key: "kidpals",
+      name: "KidPals (COPPA red flag) — F grade",
+      blurb: "Vibe-coded · no tests · runway unknown · minors w/o COPPA",
       features: {
         github: {
-          fullName: "friction-labs/kids-ai",
-          owner: "friction-labs",
-          repo: "kids-ai",
-          description: "Viral AI for kids",
+          fullName: "kidpals/app",
+          owner: "kidpals",
+          repo: "app",
+          description: "Viral AI chat for kids",
           license: "AGPL-3.0",
           language: "JavaScript",
           stars: 3,
@@ -876,8 +1077,58 @@ function buildPresets() {
           hasCI: false,
           contributorCount: 1,
         },
-        prd: analyzePRD(PRESET_PRD_BAD, "idea.md"),
-        spreadsheet: analyzeCSV(PRESET_CSV_BAD, "expenses.csv"),
+        prd: analyzePRD(PRESET_PRD_KIDPALS, "idea.md"),
+        spreadsheet: analyzeCSV(PRESET_CSV_BROKEN, "expenses.csv"),
+      },
+      customAxis: {
+        results: [
+          { id: "coppa_consent", title: "Verifiable parental consent flow", weight: 20, passed: false, observed: "no consent flow described", fix: "COPPA §312.5 requires verifiable parental consent BEFORE collecting any data from users under 13." },
+          { id: "age_gate", title: "Hard age-gate at signup", weight: 14, passed: false, observed: "no age gating mentioned", fix: "Add an age-screen with a neutral DOB question; do not allow re-attempts after a failed gate." },
+          { id: "data_minimization_minors", title: "Data minimization for under-13 users", weight: 12, passed: false, observed: "PRD doesn't define what data is collected at all", fix: "Collect only what's necessary for the activity; no behavioral ads, no targeted profiling." },
+          { id: "coppa_safe_harbor", title: "COPPA Safe Harbor / kidSAFE acknowledged", weight: 10, passed: false, observed: "not mentioned", fix: "Joining a Safe Harbor program is the cheapest path to defensible COPPA compliance." },
+          { id: "school_distribution", title: "Position vs. FERPA if distributed via schools", weight: 8, passed: false, observed: "GTM unclear", fix: "If schools are a channel, FERPA also applies and overlaps with COPPA in nuanced ways." },
+        ],
+      },
+    },
+    {
+      key: "langchain",
+      name: "LangChain-style RAG framework — B grade",
+      blurb: "Real repo · weak PRD · AI-specific custom rules",
+      features: {
+        github: {
+          fullName: "langchain-ai/langchain",
+          owner: "langchain-ai",
+          repo: "langchain",
+          description: "Building applications with LLMs through composability",
+          license: "MIT",
+          language: "Python",
+          stars: 95000,
+          pushedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+          daysSincePush: 2,
+          filenames: ["README.md", "LICENSE", "pyproject.toml", "tests", ".gitignore", ".github"],
+          readmeText: "x".repeat(4200),
+          readmeLength: 4200,
+          hasReadme: true,
+          hasLicense: true,
+          hasGitignore: true,
+          hasPackageManifest: true,
+          hasTests: true,
+          hasEnvFile: false,
+          hasCI: true,
+          contributorCount: 10,
+        },
+        prd: analyzePRD(PRESET_PRD_LANGCHAIN, "PRD.md"),
+        spreadsheet: null,
+      },
+      customAxis: {
+        results: [
+          { id: "model_versioning", title: "Model-version pinning surface", weight: 12, passed: true, observed: "framework exposes model params to caller", fix: "" },
+          { id: "prompt_injection_guidance", title: "Prompt-injection defense guidance", weight: 10, passed: false, observed: "PRD doesn't mention adversarial inputs", fix: "Document recommended defenses (input sanitization, structured outputs, tool-use allowlists)." },
+          { id: "output_filtering", title: "Output filtering / safety hooks", weight: 10, passed: false, observed: "no safety layer mentioned in PRD", fix: "Provide a middleware slot for content-safety filters before returning model output." },
+          { id: "hallucination_disclosure", title: "Hallucination disclosure in docs", weight: 8, passed: false, observed: "not mentioned in PRD", fix: "Add a 'limitations' section to README — users embedding this in customer-facing apps need to know." },
+          { id: "eval_harness", title: "Eval harness shipped", weight: 8, passed: true, observed: "tests dir present; assume eval coverage", fix: "" },
+          { id: "token_cost_tracking", title: "Built-in token / cost tracking", weight: 6, passed: true, observed: "callback handlers in framework", fix: "" },
+        ],
       },
     },
   ];
@@ -895,7 +1146,7 @@ function PresetRow({ onPick, disabled }) {
           <h3 className="mt-1 text-[16px] font-bold tracking-tight">No upload required</h3>
         </div>
       </div>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
         {presets.map((p) => (
           <button
             key={p.key}
@@ -999,15 +1250,16 @@ function RevealStage({
 
           <div className="mb-4 flex items-center justify-center">
             <StartupRadar
-              axes={AXES}
+              axes={result.scoredAxes || AXES}
               scores={animatedScores}
               labels={RADAR_LABELS}
               animate={showGrade}
+              highlight={result.hasCustom ? "custom" : null}
             />
           </div>
 
           <div className="grid grid-cols-1 gap-2">
-            {AXES.map((axis) => (
+            {(result.scoredAxes || AXES).map((axis) => (
               <AxisBar
                 key={axis}
                 axis={axis}
@@ -1318,9 +1570,15 @@ function Methodology() {
         </p>
         <p>
           <span className="font-semibold text-text-primary">Rules.</span> {RULES.length}{" "}
-          deterministic checks across 5 axes. No LLM in the scoring loop. Sub-grade = 100 −
-          (failed-weight / evaluated-weight) × 100. Composite = equal-weight average of axes
-          with at least one evaluated rule.
+          deterministic checks across 5 axes. No LLM in the deterministic scoring loop. Sub-grade
+          = 100 − (failed-weight / total-weight) × 100. Composite = equal-weight average across
+          the axes that ran.
+        </p>
+        <p>
+          <span className="font-semibold text-text-primary">Custom axis (optional).</span> If you
+          fill in the questionnaire, an LLM writes 5–8 rules tailored to your product, then a
+          second LLM call grades the repo + PRD against those rules. The custom axis is clearly
+          labeled and only contributes to the composite when it runs.
         </p>
       </div>
 

@@ -2,20 +2,23 @@ import { Home, Scale, Sparkles, MessageCircle, Gauge, ShieldAlert } from "lucide
 import logo from "../assets/logo.png";
 
 const TABS = [
-  { id: "home",    label: "Home",           Icon: Home },
-  { id: "scanner", label: "Risk Scanner",   Icon: ShieldAlert },
-  { id: "startup", label: "Startup Health", Icon: Sparkles },
-  { id: "legal",   label: "Legal",          Icon: Scale },
-  { id: "recs",    label: "Recommendations", Icon: MessageCircle },
-  { id: "financial", label: "Financial",    Icon: Gauge },
+  { id: "home",      label: "Home",            Icon: Home },
+  { id: "scanner",   label: "Risk Scanner",    Icon: ShieldAlert },
+  { id: "startup",   label: "Startup Health",  Icon: Sparkles },
+  { id: "legal",     label: "Legal",           Icon: Scale },
+  { id: "recs",      label: "Recommendations", Icon: MessageCircle },
+  { id: "financial", label: "Financial",       Icon: Gauge },
 ];
 
 export default function Sidebar({ activeTab, onTabChange }) {
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-border bg-sidebar-gradient">
-      <div className="flex items-center gap-2.5 px-6 pt-7 pb-6">
-        <img src={logo} alt="" className="h-8 w-8 rounded-lg object-contain" />
-        <span className="text-[17px] font-bold tracking-tight text-text-primary">
+    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col bg-sidebar-gradient border-r border-white/10">
+      {/* Logo */}
+      <div className="flex items-center gap-3 px-6 pt-7 pb-7">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#0052ff]">
+          <img src={logo} alt="" className="h-6 w-6 rounded object-contain" />
+        </div>
+        <span className="text-[18px] font-bold tracking-tight text-white">
           Legi-Bill
         </span>
       </div>
@@ -28,18 +31,18 @@ export default function Sidebar({ activeTab, onTabChange }) {
               key={id}
               onClick={() => onTabChange(id)}
               className={
-                "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-all " +
+                "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-semibold transition-all " +
                 (isActive
-                  ? "bg-card text-text-primary shadow-card"
-                  : "text-text-secondary hover:bg-card/60 hover:text-text-primary")
+                  ? "bg-[#0052ff] text-white shadow-glow"
+                  : "text-white/50 hover:bg-white/10 hover:text-white")
               }
             >
               <Icon
                 className={
-                  "h-[18px] w-[18px] transition-colors " +
-                  (isActive ? "text-accent-gold" : "text-text-muted group-hover:text-text-primary")
+                  "h-[18px] w-[18px] shrink-0 transition-colors " +
+                  (isActive ? "text-white" : "text-white/40 group-hover:text-white")
                 }
-                strokeWidth={2}
+                strokeWidth={2.2}
               />
               <span>{label}</span>
             </button>
@@ -47,7 +50,7 @@ export default function Sidebar({ activeTab, onTabChange }) {
         })}
       </nav>
 
-      <div className="px-6 pb-6 pt-4 text-[11px] leading-relaxed text-text-muted">
+      <div className="mx-3 mb-6 rounded-xl bg-white/5 px-4 py-3 text-[11px] leading-relaxed text-white/40">
         California environmental legislation
         <br />
         for mid-market companies.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from startup_risk.scanners.base import InventoryScanner, Scanner
 from startup_risk.scanners.code_compliance_scanner import CodeComplianceScanner
+from startup_risk.scanners.dependency_scanner import DependencyRiskScanner
 from startup_risk.scanners.dependency_vuln_scanner import DependencyVulnScanner
 from startup_risk.scanners.license_scanner import LicenseRiskScanner
 from startup_risk.scanners.outdated_deps_scanner import OutdatedDepsScanner
@@ -23,13 +24,11 @@ def default_scanners(
     license_artifact_inspection: bool = False,
     license_source_repo: bool = False,
     vuln_osv: bool = False,
-    outdated_registry: bool = False,
-    outdated_max_per_ecosystem: int = 30,
 ) -> list[Scanner]:
     return [
         StaticHygieneScanner(),
+        DependencyRiskScanner(),
         SecretScanner(),
-        CodeComplianceScanner(),
         LicenseRiskScanner(
             deterministic_only=deterministic_license_only,
             provider_name=license_llm_provider,
@@ -43,10 +42,8 @@ def default_scanners(
             enable_source_repo=license_source_repo,
         ),
         DependencyVulnScanner(enable_osv=vuln_osv),
-        OutdatedDepsScanner(
-            enable_registry=outdated_registry,
-            max_per_ecosystem=outdated_max_per_ecosystem,
-        ),
+        OutdatedDepsScanner(),
+        CodeComplianceScanner(),
     ]
 
 

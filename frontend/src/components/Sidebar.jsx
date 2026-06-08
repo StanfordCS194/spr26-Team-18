@@ -1,9 +1,10 @@
-import { Home, Scale, Sparkles, MessageCircle, Gauge, ShieldAlert } from "lucide-react";
+import { Home, Scale, Sparkles, MessageCircle, Gauge, ShieldAlert, FlaskConical } from "lucide-react";
 import logo from "../assets/logo.png";
 
 const TABS = [
   { id: "home",      label: "Home",            Icon: Home },
   { id: "scanner",   label: "Risk Scanner",    Icon: ShieldAlert },
+  { id: "benchmark", label: "Benchmark",       Icon: FlaskConical },
   { id: "startup",   label: "Startup Health",  Icon: Sparkles },
   { id: "legal",     label: "Legal",           Icon: Scale },
   { id: "recs",      label: "Recommendations", Icon: MessageCircle },
@@ -13,7 +14,6 @@ const TABS = [
 export default function Sidebar({ activeTab, onTabChange }) {
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col bg-sidebar-gradient border-r border-white/10">
-      {/* Logo */}
       <div className="flex items-center gap-3 px-6 pt-7 pb-7">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#0052ff]">
           <img src={logo} alt="" className="h-6 w-6 rounded object-contain" />
@@ -51,9 +51,9 @@ export default function Sidebar({ activeTab, onTabChange }) {
       </nav>
 
       <div className="mx-3 mb-6 rounded-xl bg-white/5 px-4 py-3 text-[11px] leading-relaxed text-white/40">
-        California environmental legislation
+        Startup risk &amp; compliance intelligence.
         <br />
-        for mid-market companies.
+        Powered by static analysis + LLMs.
       </div>
     </aside>
   );

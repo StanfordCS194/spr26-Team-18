@@ -250,7 +250,7 @@ const BENCHMARK_REPOS = [
     keyFinding: {
       title: "Credentials pattern detected in committed config file",
       severity: "high",
-      scanner: "Static hygiene",
+      scanner: "Repository hygiene",
       description: "A file named 'config.prod.yaml' is committed to the repository. It contains key patterns consistent with API keys and database connection strings. Sensitive credential files should not be committed even if values are placeholders.",
       file: "config.prod.yaml",
       line: null,
@@ -296,7 +296,7 @@ const BENCHMARK_REPOS = [
     keyFinding: {
       title: "No SECURITY.md — no vulnerability disclosure path for enterprise customers",
       severity: "high",
-      scanner: "Static hygiene",
+      scanner: "Repository hygiene",
       description: "The repository has no SECURITY.md file. Enterprise buyers expect a documented vulnerability disclosure policy before signing contracts. Without one, security researchers and customers have no sanctioned way to report issues.",
       file: "(repository root)",
       line: null,
@@ -461,7 +461,7 @@ export default function Benchmark() {
           <p className="text-[12px] text-text-secondary leading-snug">
             <span className="font-semibold text-text-primary">Early results — </span>
             benchmark is computed against the public GitHub Advisory Database.
-            Findings shown are possible triggers identified by static analysis, not legal conclusions.
+            Findings shown are possible triggers identified by automated analysis, not legal conclusions.
             Full benchmark with live data coming soon.
           </p>
         </div>
@@ -569,7 +569,7 @@ export default function Benchmark() {
 
       {/* ── Disclaimer ── */}
       <p className="text-[11px] text-text-muted leading-relaxed border-t border-border pt-4">
-        Findings are possible triggers identified by static analysis — not legal conclusions. Advisory correlations are illustrative
+        Findings are possible triggers identified by automated analysis — not legal conclusions. Advisory correlations are illustrative
         examples based on the class of issue found, not claims that our scanner would have prevented the specific incident.
         All findings use cautious language per our design principles. Advisory IDs shown are placeholder references pending
         full benchmark publication.

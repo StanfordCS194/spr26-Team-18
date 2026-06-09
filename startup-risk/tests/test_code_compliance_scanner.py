@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from startup_risk.core.models import FileSnapshot, RepositorySnapshot, RepositorySource
@@ -22,173 +23,120 @@ def _snapshot(*files: tuple[str, str]) -> RepositorySnapshot:
     )
 
 
-scanner = CodeComplianceScanner()
+class _FakeLLM:
+    """Returns a canned findings payload and records the prompts it receives."""
+
+    def __init__(self, findings: list[dict]) -> None:
+        self._findings = findings
+        self.calls: list[tuple[str, str]] = []
+
+    def __call__(self, system: str, user: str) -> str:
+        self.calls.append((system, user))
+        return json.dumps({"findings": self._findings})
 
 
-def test_detects_token_in_localstorage():
-    snap = _snapshot(("src/auth.js", "localStorage.setItem('token', userToken)"))
-    findings = scanner.scan(snap)
-    assert any("token_in_browser_storage" in f.id for f in findings)
+def _f(file: str, line: int = 1, rule: str = "token_in_browser_storage",
+       severity: str = "high") -> dict:
+    return {
+        "rule": rule,
+        "title": "Auth token in browser storage",
+        "description": "Token written to localStorage, readable by injected scripts.",
+        "severity": severity,
+        "recommendation": "Use HttpOnly Secure cookies instead.",
+        "file": file,
+        "line": line,
+        "excerpt": "localStorage.setItem('token', t)",
+    }
 
 
-def test_detects_token_in_sessionstorage():
-    snap = _snapshot(("src/login.ts", "sessionStorage.setItem('auth', jwt)"))
-    findings = scanner.scan(snap)
-    assert any("token_in_browser_storage" in f.id for f in findings)
+def test_no_op_without_llm():
+    scanner = CodeComplianceScanner(api_key="")
+    assert scanner.enabled is False
+    assert scanner.scan(_snapshot(("src/auth.js", "localStorage.setItem('t', x)"))) == []
 
 
-def test_detects_insecure_cookie():
-    snap = _snapshot(("src/server.js", "res.cookie('session', value)"))
-    findings = scanner.scan(snap)
-    assert any("insecure_cookie" in f.id for f in findings)
+def test_maps_llm_findings_to_finding_objects():
+    fake = _FakeLLM([_f("src/auth.js", line=12)])
+    scanner = CodeComplianceScanner(llm=fake)
+    assert scanner.enabled is True
+
+    findings = scanner.scan(_snapshot(("src/auth.js", "localStorage.setItem('t', x)\n")))
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.scanner_id == "code_compliance"
+    assert f.category == "code_compliance"
+    assert f.severity == "high"
+    assert f.evidence[0].location.path == "src/auth.js"
+    assert f.evidence[0].location.line_start == 12
+    assert "cookie" in f.recommendation.lower()
 
 
-def test_secure_cookie_not_flagged():
-    code = "res.cookie('session', value, { httpOnly: true, secure: true, sameSite: 'Lax' })"
-    snap = _snapshot(("src/server.js", code))
-    findings = scanner.scan(snap)
-    assert not any("insecure_cookie" in f.id for f in findings)
+def test_drops_finding_for_path_not_in_snapshot():
+    fake = _FakeLLM([_f("does/not/exist.js"), _f("src/app.py")])
+    scanner = CodeComplianceScanner(llm=fake)
+    findings = scanner.scan(_snapshot(("src/app.py", "x = 1\n")))
+    assert len(findings) == 1
+    assert findings[0].evidence[0].location.path == "src/app.py"
 
 
-def test_detects_under_13_without_consent():
-    snap = _snapshot(("src/signup.py", "if user_age < 13: create_account(user)"))
-    findings = scanner.scan(snap)
-    assert any("minor_flow_no_consent" in f.id for f in findings)
+def test_invalid_severity_defaults_to_medium():
+    fake = _FakeLLM([_f("src/app.py", severity="catastrophic")])
+    scanner = CodeComplianceScanner(llm=fake)
+    findings = scanner.scan(_snapshot(("src/app.py", "x = 1\n")))
+    assert findings[0].severity == "medium"
 
 
-def test_detects_coppa_reference_without_controls():
-    snap = _snapshot(("src/signup.py", "# COPPA applies here"))
-    findings = scanner.scan(snap)
-    assert any("minor_flow_no_consent" in f.id for f in findings)
+def test_malformed_json_is_safe():
+    def bad_llm(system: str, user: str) -> str:
+        return "not json"
+
+    scanner = CodeComplianceScanner(llm=bad_llm)
+    assert scanner.scan(_snapshot(("src/app.py", "x = 1\n"))) == []
 
 
-def test_detects_underage_without_consent():
-    snap = _snapshot(("src/onboarding.py", "if underage: block_signup()"))
-    findings = scanner.scan(snap)
-    assert any("minor_flow_no_consent" in f.id for f in findings)
+def test_skips_tests_docs_and_nonsource_files():
+    fake = _FakeLLM([])
+    scanner = CodeComplianceScanner(llm=fake)
+    scanner.scan(_snapshot(
+        ("src/app.py", "x = 1\n"),
+        ("tests/test_app.py", "secret = 'sk-123'\n"),
+        ("docs/guide.md", "localStorage.setItem('t', x)\n"),
+        ("README.md", "hello\n"),
+    ))
+    # Exactly one chunk, and it only contains the source file.
+    assert len(fake.calls) == 1
+    prompt = fake.calls[0][1]
+    assert "src/app.py" in prompt
+    assert "tests/test_app.py" not in prompt
+    assert "docs/guide.md" not in prompt
+    assert "README.md" not in prompt
 
 
-def test_minor_with_consent_not_flagged():
-    code = "if age < 13: require_parent_consent()"
-    snap = _snapshot(("src/signup.py", code))
-    findings = scanner.scan(snap)
-    assert not any("minor_flow_no_consent" in f.id for f in findings)
+def test_line_numbers_present_in_prompt():
+    fake = _FakeLLM([])
+    scanner = CodeComplianceScanner(llm=fake)
+    scanner.scan(_snapshot(("src/app.py", "first\nsecond\n")))
+    prompt = fake.calls[0][1]
+    assert "1: first" in prompt and "2: second" in prompt
 
 
-def test_coppa_without_consent_fires():
-    # COPPA mention is the signal; without a nearby consent/guardian gate it should fire.
-    snap = _snapshot(("src/signup.py", "# COPPA applies here"))
-    findings = scanner.scan(snap)
-    assert any("minor_flow_no_consent" in f.id for f in findings)
+def test_chunks_large_input_into_multiple_calls():
+    big = "x = 1\n" * 60  # ~360 chars each
+    fake = _FakeLLM([])
+    scanner = CodeComplianceScanner(llm=fake, max_chunk_chars=300)
+    scanner.scan(_snapshot(
+        ("src/a.py", big),
+        ("src/b.py", big),
+        ("src/c.py", big),
+    ))
+    assert len(fake.calls) >= 2  # batched across multiple calls, not one
 
 
-def test_coppa_with_consent_not_flagged():
-    code = "# COPPA: parental consent required\nif age < 13: require_guardian_consent()"
-    snap = _snapshot(("src/signup.py", code))
-    findings = scanner.scan(snap)
-    assert not any("minor_flow_no_consent" in f.id for f in findings)
-
-
-def test_tree_child_not_flagged():
-    snap = _snapshot(("src/tree.py", "for child in node.children: traverse(child)"))
-    findings = scanner.scan(snap)
-    assert not any("minor_flow_no_consent" in f.id for f in findings)
-
-
-def test_minor_version_not_flagged():
-    snap = _snapshot(("src/versioning.py", "major, minor, patch = version.split('.')"))
-    findings = scanner.scan(snap)
-    assert not any("minor_flow_no_consent" in f.id for f in findings)
-
-
-def test_detects_health_data_without_controls():
-    snap = _snapshot(("src/records.py", "diagnosis = patient.get_diagnosis()"))
-    findings = scanner.scan(snap)
-    assert any("health_data_no_controls" in f.id for f in findings)
-
-
-def test_health_data_with_controls_not_flagged():
-    code = "# HIPAA: PHI encrypted at rest\ndiagnosis = encrypt(patient.get_diagnosis())"
-    snap = _snapshot(("src/records.py", code))
-    findings = scanner.scan(snap)
-    assert not any("health_data_no_controls" in f.id for f in findings)
-
-
-def test_detects_tracking_sdk():
-    snap = _snapshot(("src/analytics.js", "posthog.init('ph_key', { api_host: 'https://app.posthog.com' })"))
-    findings = scanner.scan(snap)
-    assert any("tracking_sdk" in f.id for f in findings)
-
-
-def test_detects_mixpanel():
-    snap = _snapshot(("src/track.ts", "mixpanel.track('page_view', props)"))
-    findings = scanner.scan(snap)
-    assert any("tracking_sdk" in f.id for f in findings)
-
-
-def test_detects_attribute_assignment_without_governance():
-    snap = _snapshot(("src/user.py", "user.email = form.email"))
-    findings = scanner.scan(snap)
-    assert any("personal_data_no_controls" in f.id for f in findings)
-
-
-def test_detects_bare_assignment_without_governance():
-    snap = _snapshot(("src/profile.py", "email = request.data['email']"))
-    findings = scanner.scan(snap)
-    assert any("personal_data_no_controls" in f.id for f in findings)
-
-
-def test_personal_data_with_governance_not_flagged():
-    code = "# consent obtained; encrypted; retention = 90 days\nuser.email = encrypt(form.email)"
-    snap = _snapshot(("src/user.py", code))
-    findings = scanner.scan(snap)
-    assert not any("personal_data_no_controls" in f.id for f in findings)
-
-
-def test_stdlib_email_import_not_flagged():
-    snap = _snapshot(("src/utils.py", "from email.utils import format_datetime"))
-    findings = scanner.scan(snap)
-    assert not any("personal_data_no_controls" in f.id for f in findings)
-
-
-def test_email_method_call_not_flagged():
-    snap = _snapshot(("src/mail.py", "message = email.message()"))
-    findings = scanner.scan(snap)
-    assert not any("personal_data_no_controls" in f.id for f in findings)
-
-
-def test_html_email_type_not_flagged():
-    snap = _snapshot(("src/form.py", "field = '<input type=\"email\" name=\"email\">'"))
-    findings = scanner.scan(snap)
-    assert not any("personal_data_no_controls" in f.id for f in findings)
-
-
-def test_skips_test_files():
-    snap = _snapshot(("tests/test_auth.py", "localStorage.setItem('token', value)"))
-    assert scanner.scan(snap) == []
-
-
-def test_skips_docs_files():
-    snap = _snapshot(("docs/privacy.md", "localStorage.setItem('token', value)"))
-    assert scanner.scan(snap) == []
-
-
-def test_skips_non_source_extensions():
-    snap = _snapshot(("config.yaml", "sessionStorage.setItem('token', value)"))
-    assert scanner.scan(snap) == []
-
-
-def test_finding_ids_stable_and_url_safe():
-    snap = _snapshot(("src/a.js", "localStorage.setItem('session', jwt)"))
-    first = scanner.scan(snap)
-    second = scanner.scan(snap)
-    assert [f.id for f in first] == [f.id for f in second]
-    for f in first:
-        assert f.id == f.id.lower()
-        assert f.id.startswith("code_compliance.")
-
-
-def test_all_findings_have_correct_scanner_id():
-    snap = _snapshot(("src/app.py", "email = user.email\ncookies.set('s', val)"))
-    findings = scanner.scan(snap)
-    assert all(f.scanner_id == "code_compliance" for f in findings)
+def test_all_findings_have_scanner_id_and_safe_ids():
+    fake = _FakeLLM([_f("src/app.py", line=3), _f("src/app.py", line=7, rule="insecure_cookie")])
+    scanner = CodeComplianceScanner(llm=fake)
+    findings = scanner.scan(_snapshot(("src/app.py", "a\n" * 10)))
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789._-")
+    for f in findings:
+        assert f.scanner_id == "code_compliance"
+        assert all(c in allowed for c in f.id)

@@ -32,6 +32,10 @@ const BASE_SCANNERS = [
   { id: "dependency_vuln", kind: "scanner", label: "Dependency vulnerabilities", Icon: Bug,      desc: "Known CVEs via OSV database" },
   { id: "outdated_deps",   kind: "scanner", label: "Outdated dependencies",   Icon: RefreshCw,   desc: "Behind-latest packages per registry" },
   { id: "code_compliance", kind: "agent",   label: "Code compliance agent",   Icon: ShieldCheck, desc: "LLM review of privacy, cookie, tracking & PII risk" },
+  { id: "auth_access_control", kind: "agent", label: "Auth & access-control agent", Icon: ShieldAlert, desc: "Authz flows, IDOR, missing access checks" },
+  { id: "pii_data_flow",   kind: "agent",   label: "PII data-flow agent",     Icon: Globe,       desc: "Traces personal data; retention, consent, encryption gaps" },
+  { id: "infra_misconfig", kind: "agent",   label: "Infra misconfig agent",   Icon: Building2,   desc: "Dockerfiles, CORS, exposed ports, IaC settings" },
+  { id: "vuln_exploitability", kind: "agent", label: "Vuln exploitability agent", Icon: Package,  desc: "Reachability of known CVEs in your code" },
   { id: "custom_compliance", kind: "agent", label: "AI-tailored agent",       Icon: Sparkles,    desc: "Startup-specific rules generated from your profile" },
 ];
 
@@ -55,6 +59,10 @@ const SCANNER_LABELS = {
   dependency_vuln: "Dependency Vuln",
   outdated_deps:   "Outdated Deps",
   code_compliance: "Code Compliance Agent",
+  auth_access_control: "Auth & Access-Control Agent",
+  pii_data_flow: "PII Data-Flow Agent",
+  infra_misconfig: "Infra Misconfig Agent",
+  vuln_exploitability: "Vuln Exploitability Agent",
   custom_compliance: "AI-Tailored Agent",
 };
 

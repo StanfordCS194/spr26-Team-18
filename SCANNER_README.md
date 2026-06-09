@@ -1,13 +1,14 @@
 # Startup Risk Scanner
 
-A web platform where founders paste a public GitHub repository URL, select their industry vertical, and receive evidence-backed compliance and security findings — powered by a combination of deterministic static-analysis scanners and LLMs.
+A web platform where founders paste a public GitHub repository URL, select their industry vertical, and receive evidence-backed compliance and security findings — powered by **LLM reasoning agents** for judgment-heavy analysis and **deterministic scanners** for fact-retrieval (secrets, CVEs, versions).
 
 **Core design principles:**
 - Evidence first — every finding cites a file and line number, not a generic warning
 - Severity and confidence are always shown separately
 - Cautious language throughout — "possible trigger", "needs review", never "violation" or "illegal"
 - Industry routing — don't run HIPAA rules on a fintech repo; route the right scanner pack to the right repo
-- Static analysis only — the scanner never executes code from the target repository
+- No code execution — agents and scanners read the target repository, never run it
+- Agents reason; deterministic tools ground them — CVE/secret facts come from OSV and pattern checks, never from model recall, so findings are not hallucinated
 
 ---
 
@@ -36,7 +37,7 @@ startup-risk/           Python scanner backend (FastAPI)
   └─ outputs/           JSON and text report formatters
 ```
 
-The frontend posts `POST /api/scan` with `{ repo_url, industry, product_name }`. Vite proxies `/api` → `http://localhost:8000`. When the backend is not running, the frontend falls back to illustrative placeholder findings with a visible disclaimer.
+The frontend posts `POST /api/scan` with `{ repo_url, industry, product_name, questionnaire }`. Vite proxies `/api` → `http://localhost:8000`. If the backend is unreachable the frontend shows a real error — it never fabricates findings.
 
 ---
 
@@ -81,108 +82,38 @@ by default. No embedding calls are used.
 
 ---
 
-## Existing scanners
+## Agents and scanners
 
-### 1. Static Hygiene Scanner
-`startup-risk/startup_risk/scanners/static_hygiene.py`
+Every check runs through the shared `Scanner` protocol (`scan(snapshot) -> list[Finding]`) and is wired in `scanners/registry.py`. Two kinds:
 
-Always runs. Checks for missing standard files and suspicious committed filenames.
+- **Agents** — LLM-driven reasoning (`scanners/llm_agent.py` base). They read line-numbered source, batched under a char budget across calls so large repos are covered, and emit findings tied to a real file+line. **No-op safe:** without an LLM key (`OPENAI_API_KEY`) they return nothing. Where facts matter, they are grounded by deterministic tools so they reason rather than hallucinate.
+- **Scanners** — deterministic checks for fact-retrieval tasks (secrets, CVE lookups, version/registry checks) where regex / DB / registry lookups are more reliable than a model.
 
-**Checks:**
-- Missing `README.md` — repo not safe to share
-- Missing `LICENSE` — ambiguous usage rights
-- Missing `.gitignore` — risk of accidentally committing secrets or build artifacts
-- Missing `SECURITY.md` — no vulnerability disclosure path; enterprise buyers expect this
-- Suspicious filenames — `.env`, `.env.*` (except template variants), `.key`, `.pem`, `.p12`, `.pfx`, `id_rsa`, `id_ed25519`, `*credential*`, `*secret*`, `*token*`, `*private_key*`
+### Agents (LLM-driven)
 
-Severity scales by file location: root-level is `high`, test/docs/examples directories are `low`, everything else is `medium`.
+| Agent | id | What it does |
+|---|---|---|
+| Code Compliance Agent | `code_compliance` | Reviews source for privacy/security risk: auth tokens in browser storage, insecure cookies, minor/child consent (COPPA), PHI handling, tracking SDKs, PII governance |
+| Auth & Access-Control Agent | `auth_access_control` | Authn/authz flow defects: IDOR / broken object-level authorization, missing auth on sensitive routes, client-only checks, privilege escalation |
+| PII Data-Flow Agent | `pii_data_flow` | Traces personal data entry → storage → logging → egress; flags retention/consent/encryption gaps and unsafe handling of sensitive categories |
+| Vuln Exploitability Agent | `vuln_exploitability` | **Tool-grounded:** OSV provides ground-truth CVEs for pinned deps; the agent judges real reachability (is the vulnerable package actually used?) to cut noise |
+| Infra / IaC Misconfig Agent | `infra_misconfig` | Dockerfiles, compose, k8s, Terraform, CI, nginx/env configs: root containers, baked secrets, open CORS/ports, disabled TLS, `latest` tags |
+| AI-Tailored Custom Agent | `custom_compliance` | Generates a startup-specific ruleset from the onboarding profile (stage, customers, data sensitivity, GTM) + repo facts, then grades the repo against it |
 
----
+### Scanners (deterministic)
 
-### 2. License Risk Scanner
-`startup-risk/startup_risk/scanners/license_scanner/`
+| Scanner | id | What it does |
+|---|---|---|
+| Repository Hygiene | `static_hygiene` | Missing `README`/`LICENSE`/`.gitignore`/`SECURITY.md`; suspicious committed filenames (`.env`, `.pem`, `id_rsa`, `*secret*`…). Severity scales by location |
+| Dependency Risk | `dependency_risk` | Multi-language manifest parsing / dependency inventory |
+| Secret Scanner | `secret_scanner` | PEM private keys (`critical`), AWS key IDs (`critical`), hardcoded secret literals & creds-in-URLs (`high`); suppresses placeholders |
+| License Risk | `license_risk` | SPDX license inventory across 8 ecosystems; flags copyleft / non-commercial / no-license. Optional LLM classification for ambiguous cases |
+| Dependency Vulnerability | `dependency_vuln` | Batch-queries [OSV](https://osv.dev) for pinned versions; one finding per CVE, severity from the OSV record |
+| Outdated Dependencies | `outdated_deps` | Pinned vs latest via live registry APIs (PyPI · npm · crates.io · RubyGems), capped per ecosystem |
 
-Always runs. Multi-language dependency license inventory with deterministic SPDX identification plus optional LLM classification for ambiguous cases.
+Plus **Repository Inventory** (`repo_inventory`) — a metadata pass producing `RepositoryInventory` (languages, manifests, schema/infra/config files) consumed by the others rather than emitting findings.
 
-**Supported manifest parsers:**
-- Node.js — `package.json`, `package-lock.json`, `yarn.lock`
-- Python — `requirements.txt`, `pyproject.toml`, `setup.py`, `Pipfile`
-- Go — `go.mod`
-- Rust — `Cargo.toml`, `Cargo.lock`
-- Java/Kotlin — `pom.xml`, `build.gradle`
-- Ruby — `Gemfile`, `Gemfile.lock`
-- PHP — `composer.json`, `composer.lock`
-- .NET — `*.csproj`, `packages.config`
-
-**License risk tiers flagged:**
-- `copyleft_strong` — GPL-2.0, GPL-3.0, AGPL-3.0 — may require source disclosure of the combined work
-- `copyleft_weak` — LGPL-2.1, LGPL-3.0, MPL-2.0 — linking and attribution obligations
-- `non_commercial` — CC-BY-NC and variants — non-commercial-only restrictions
-- `no_known_license` — no license file found — all rights reserved by default
-
----
-
-### 3. Repository Inventory Scanner
-`startup-risk/startup_risk/scanners/repo_inventory.py`
-
-Runs as a metadata pass; produces `RepositoryInventory` used by downstream scanners rather than `Finding` objects directly.
-
-**Catalogues:**
-- Languages detected (Go, Java, JavaScript, Kotlin, Python, Ruby, Rust, TypeScript)
-- Manifest and lockfile presence
-- Schema files (`.sql`, `.prisma`, `.proto`, `.graphql`, `.jsonschema`)
-- Infrastructure files (`Dockerfile`, `docker-compose.yml`, `.tf`, `.tfvars`)
-- Config files (`.env.example`, `.gitignore`, `vercel.json`, `netlify.toml`)
-
----
-
-### 4. Secret Scanner *(branch: `add-secret-scanner` — pending merge)*
-`startup-risk/startup_risk/scanners/secret_scanner.py`
-
-Scans source file text (not just filenames) for committed secrets. Skips binary, lock, and asset files. Suppresses placeholder patterns like `your-key-here`, `changeme`, `${VAR}`.
-
-**Checks:**
-- PEM private key headers — `-----BEGIN PRIVATE KEY-----` and variants — severity `critical`
-- AWS access key IDs — `AKIA/AGPA/AIDA/AROA/AIPA/ANPA/ANVA/ASIA` + 16-char body — severity `critical`
-- Hardcoded secrets via keyword assignment — `api_key =`, `password =`, `client_secret =`, `db_password =`, etc. with a string literal value ≥16 chars — severity `high`
-- Credentials in connection URLs — `postgres://user:PASSWORD@`, `redis://user:PASSWORD@`, etc. — severity `high`
-
-Severity drops one tier for findings in test, examples, or docs directories.
-
----
-
-### 5. Dependency Vulnerability Scanner *(branch: `add-dependency-vuln-scanner` — pending merge)*
-`startup-risk/startup_risk/scanners/dependency_vuln_scanner.py`
-
-Parses all dependency manifests, then batch-queries the [OSV vulnerability database](https://osv.dev) for every pinned dependency version. Returns one finding per CVE/advisory per affected package, linking to the OSV entry and citing the manifest file + line number.
-
-**Supported ecosystems:** PyPI · npm · crates.io · Go · Maven · RubyGems · Packagist · NuGet
-
-Severity is derived from the OSV record's `database_specific.severity` field (GitHub Advisory style), falling back to `high` if any CVSS score is present.
-
----
-
-### 6. Outdated Dependencies Scanner *(branch: `add-outdated-deps-scanner` — pending merge)*
-`startup-risk/startup_risk/scanners/outdated_deps_scanner.py`
-
-Checks pinned dependency versions against live registry APIs. Flags anything where the pinned version is behind the current latest release. Capped at 30 packages per ecosystem to stay within registry rate limits.
-
-**Supported registries:** PyPI · npm · crates.io · RubyGems
-
----
-
-### 7. Code Compliance Scanner *(branch: `add-code-compliance-scanner` — pending merge)*
-`startup-risk/startup_risk/scanners/code_compliance_scanner.py`
-
-Scans source files (JS, TS, Python, Go, Ruby, Java, Kotlin, C#, Swift, PHP, Rust, Scala) for privacy and security compliance patterns. Uses a ±4-line context window to check for nearby controls before flagging.
-
-**Checks:**
-- **Auth token in browser storage** — `localStorage.setItem(…token…)` — severity `high` (XSS attack vector)
-- **Cookie set without security flags** — `document.cookie =`, `res.cookie()`, `response.set_cookie()` without `HttpOnly`/`Secure`/`SameSite` in surrounding code — severity `high`
-- **Minor-user code path without consent handling** — references to `child`, `minor`, `under-13`, `coppa` without a nearby age gate, parental consent, or verification check — severity `high`
-- **Health data without PHI safeguards** — `patient`, `diagnosis`, `ehr`, `fhir`, `phi` etc. without nearby `encrypt`, `audit`, `hipaa`, `access_control` — severity `high`
-- **Third-party tracking SDK** — PostHog, Mixpanel, Amplitude, Segment, GTM, Facebook Pixel, Heap, FullStory, Hotjar, Clarity — severity `medium`
-- **PII field without data-governance handling** — `email`, `phone`, `ssn`, `date_of_birth`, `geolocation`, `ip_address` etc. without nearby deletion, retention, consent, or encryption logic — severity `medium`
+> Note: the `dependency_vuln` scanner and the `vuln_exploitability` agent are complementary — the scanner reports every OSV match; the agent triages which are actually reachable.
 
 ---
 

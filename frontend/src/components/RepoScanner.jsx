@@ -24,14 +24,15 @@ const INDUSTRIES = [
 // ── Scanners ──────────────────────────────────────────────────────────────────
 // These match the actual scanner IDs in the backend.
 
+// kind: "scanner" = deterministic check; "agent" = LLM-driven reasoning.
 const BASE_SCANNERS = [
-  { id: "static_hygiene",  label: "Repository hygiene",      Icon: FileSearch,  desc: "Missing files, sensitive filenames" },
-  { id: "license_scanner", label: "License inventory",       Icon: Lock,        desc: "GPL · AGPL · copyleft obligations" },
-  { id: "secret_scanner",  label: "Secret detection",        Icon: KeyRound,    desc: "Hardcoded keys, PEM certs, connection strings" },
-  { id: "dependency_vuln", label: "Dependency vulnerabilities", Icon: Bug,      desc: "Known CVEs via OSV database" },
-  { id: "outdated_deps",   label: "Outdated dependencies",   Icon: RefreshCw,   desc: "Behind-latest packages per registry" },
-  { id: "code_compliance", label: "Code compliance",         Icon: ShieldCheck, desc: "Privacy patterns, cookie flags, tracking SDKs" },
-  { id: "custom_compliance", label: "AI-tailored scan",      Icon: Sparkles,    desc: "Startup-specific rules from your profile" },
+  { id: "static_hygiene",  kind: "scanner", label: "Repository hygiene",      Icon: FileSearch,  desc: "Missing files, sensitive filenames" },
+  { id: "license_scanner", kind: "scanner", label: "License inventory",       Icon: Lock,        desc: "GPL · AGPL · copyleft obligations" },
+  { id: "secret_scanner",  kind: "scanner", label: "Secret detection",        Icon: KeyRound,    desc: "Hardcoded keys, PEM certs, connection strings" },
+  { id: "dependency_vuln", kind: "scanner", label: "Dependency vulnerabilities", Icon: Bug,      desc: "Known CVEs via OSV database" },
+  { id: "outdated_deps",   kind: "scanner", label: "Outdated dependencies",   Icon: RefreshCw,   desc: "Behind-latest packages per registry" },
+  { id: "code_compliance", kind: "agent",   label: "Code compliance agent",   Icon: ShieldCheck, desc: "LLM review of privacy, cookie, tracking & PII risk" },
+  { id: "custom_compliance", kind: "agent", label: "AI-tailored agent",       Icon: Sparkles,    desc: "Startup-specific rules generated from your profile" },
 ];
 
 // Industry-specific scanners shown as aspirational (coming soon) in the scanner preview
@@ -53,8 +54,8 @@ const SCANNER_LABELS = {
   secret_scanner:  "Secret Scanner",
   dependency_vuln: "Dependency Vuln",
   outdated_deps:   "Outdated Deps",
-  code_compliance: "Code Compliance",
-  custom_compliance: "AI-Tailored",
+  code_compliance: "Code Compliance Agent",
+  custom_compliance: "AI-Tailored Agent",
 };
 
 // ── Severity config ───────────────────────────────────────────────────────────
@@ -476,28 +477,23 @@ export default function RepoScanner({
 
       if (!res.ok) {
         const text = await res.text();
-        const error = new Error(text || `Server error ${res.status}`);
-        error.useFallback = res.status >= 500;
-        throw error;
+        throw new Error(text || `Server error ${res.status}`);
       }
 
       const data = await res.json();
       setResults(data);
       setStep("results");
     } catch (err) {
-      if (
-        err.useFallback ||
-        err.message.includes("Failed to fetch") ||
-        err.message.includes("502") ||
-        err.message.includes("404") ||
-        err.message.includes("NetworkError")
-      ) {
-        setResults(PLACEHOLDER_RESULTS);
-        setStep("results");
-      } else {
-        setApiError(err.message);
-        setStep("form");
-      }
+      // Never fabricate findings. Surface the real error so a failed scan is
+      // never mistaken for a clean (or dirty) repo.
+      const unreachable =
+        err.message.includes("Failed to fetch") || err.message.includes("NetworkError");
+      setApiError(
+        unreachable
+          ? "Couldn't reach the scanner backend. Make sure the API is running, then try again."
+          : err.message,
+      );
+      setStep("form");
     }
   }
 
@@ -620,7 +616,7 @@ export default function RepoScanner({
         {/* Scanners preview */}
         {industry && (
           <div className="rounded-2xl border border-border bg-card/60 p-5 shadow-card space-y-3 animate-fade-in">
-            <div className="text-[12px] uppercase tracking-wider text-text-muted">Scanners that will run</div>
+            <div className="text-[12px] uppercase tracking-wider text-text-muted">Agents &amp; scanners that will run</div>
             <div className="flex flex-wrap gap-2">
               {BASE_SCANNERS.map((s) => (
                 <span
@@ -629,6 +625,11 @@ export default function RepoScanner({
                 >
                   <s.Icon className="h-3 w-3" strokeWidth={2} />
                   {s.label}
+                  {s.kind === "agent" && (
+                    <span className="ml-0.5 rounded-full bg-accent-gold/15 px-1.5 text-[9px] font-semibold uppercase tracking-wide text-accent-gold">
+                      Agent
+                    </span>
+                  )}
                 </span>
               ))}
               {(INDUSTRY_SCANNERS[industry] ?? []).map((s) => (
@@ -680,122 +681,3 @@ export default function RepoScanner({
   );
 }
 
-// ── Placeholder results ───────────────────────────────────────────────────────
-// Shown when the backend isn't connected. Evidence uses the backend's schema
-// (location.path / location.line_start) so the FindingCard renders identically
-// to real results and the transition to live data is seamless.
-
-const PLACEHOLDER_RESULTS = {
-  findings: [
-    {
-      id: "ph-secret-1",
-      title: "Possible hardcoded API key in source file",
-      description:
-        "A source file contains what appears to be an API key assigned as a string literal. If this is a live credential it should be rotated immediately and moved to an environment variable or secrets manager.",
-      severity: "high",
-      confidence: "medium",
-      scanner_id: "secret_scanner",
-      evidence: [
-        {
-          location: { path: "src/config.js", line_start: 7 },
-          description: "Matched hardcoded_secret pattern in root file.",
-          excerpt: "api_key = '[REDACTED]'",
-        },
-      ],
-      recommendation:
-        "Remove the value from source control, rotate the credential, and load it from an environment variable or secrets manager (e.g. AWS Secrets Manager, Doppler).",
-    },
-    {
-      id: "ph-vuln-1",
-      title: "Known vulnerability in lodash 4.17.15 (GHSA-p6mc-m468-83gw)",
-      description:
-        "lodash@4.17.15 (npm) is affected by a prototype pollution vulnerability tracked in the OSV database. An attacker can modify Object.prototype via a crafted payload to _.set, _.merge, or _.setWith.",
-      severity: "high",
-      confidence: "high",
-      scanner_id: "dependency_vuln",
-      evidence: [
-        {
-          location: { path: "package.json", line_start: 12 },
-          description: "GHSA-p6mc-m468-83gw: Prototype pollution in lodash.",
-          excerpt: "https://osv.dev/vulnerability/GHSA-p6mc-m468-83gw",
-        },
-      ],
-      recommendation:
-        "Upgrade lodash to 4.17.21 or later. See https://osv.dev/vulnerability/GHSA-p6mc-m468-83gw for patched version ranges.",
-    },
-    {
-      id: "ph-license-1",
-      title: "GPL-3.0 runtime dependency — possible distribution obligation",
-      description:
-        "A GPL-3.0 licensed library is declared as a runtime dependency. If the product is distributed as a binary (not pure SaaS), GPL-3.0 may require making the full source of the combined work available to users.",
-      severity: "high",
-      confidence: "high",
-      scanner_id: "license_scanner",
-      evidence: [
-        {
-          location: { path: "requirements.txt", line_start: 18 },
-          description: "Dependency uses GPL-3.0 license.",
-          excerpt: "some-gpl-lib==2.1.0",
-        },
-      ],
-      recommendation:
-        "Review whether this dependency is required at runtime. Consider a permissively licensed alternative (MIT, Apache-2.0). Consult counsel if distributing binaries.",
-    },
-    {
-      id: "ph-code-1",
-      title: "Auth token stored in browser localStorage",
-      description:
-        "An auth token is being written to localStorage, which is accessible by any JavaScript on the page — including injected scripts. This is a common XSS attack vector.",
-      severity: "high",
-      confidence: "medium",
-      scanner_id: "code_compliance",
-      evidence: [
-        {
-          location: { path: "src/auth/session.ts", line_start: 23 },
-          description: "Matched token_in_browser_storage pattern.",
-          excerpt: "localStorage.setItem('auth_token', response.token)",
-        },
-      ],
-      recommendation:
-        "Store auth tokens in HttpOnly, Secure, SameSite=Lax cookies or a server-side session. Never store bearer tokens in web storage.",
-    },
-    {
-      id: "ph-outdated-1",
-      title: "Outdated dependency: express 4.17.1 → 4.21.2",
-      description:
-        "express (npm) is pinned to 4.17.1 but the latest release is 4.21.2. Outdated packages may contain unpatched vulnerabilities or miss important security fixes.",
-      severity: "low",
-      confidence: "high",
-      scanner_id: "outdated_deps",
-      evidence: [
-        {
-          location: { path: "package.json", line_start: 8 },
-          description: "Pinned to 4.17.1, latest release is 4.21.2.",
-          excerpt: '"express": "4.17.1"',
-        },
-      ],
-      recommendation:
-        "Upgrade express from 4.17.1 to 4.21.2. Review the changelog for breaking changes before upgrading.",
-    },
-    {
-      id: "ph-hygiene-1",
-      title: "Missing SECURITY.md",
-      description:
-        "The repository does not include a SECURITY.md file. This is expected by GitHub's security advisory system and by enterprise buyers during vendor diligence.",
-      severity: "low",
-      confidence: "high",
-      scanner_id: "static_hygiene",
-      evidence: [
-        {
-          location: null,
-          description: "No top-level SECURITY.md file was found in the repository snapshot.",
-          excerpt: null,
-        },
-      ],
-      recommendation:
-        "Add a SECURITY.md to the repo root describing your vulnerability disclosure policy and a contact method for security researchers.",
-    },
-  ],
-  disclaimer:
-    "Backend not connected — these are illustrative example findings. The same scanner suite that produced this output runs against real repositories. No conclusions about any specific repository should be drawn from this placeholder output.",
-};

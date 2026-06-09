@@ -2,6 +2,6 @@
   "name": "legi-bill",
   "private": true,
   "scripts": {
-    "dev": "npm run dev --prefix frontend-b"
+    "dev": "npm run dev --prefix frontend"
   }
 }

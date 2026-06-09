@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 from startup_risk.scanners.analytics_privacy import AnalyticsPrivacyScanner
+from startup_risk.scanners.auth_agent import AuthAccessControlAgent
 from startup_risk.scanners.base import InventoryScanner, Scanner
 from startup_risk.scanners.code_compliance_scanner import CodeComplianceScanner
 from startup_risk.scanners.custom_scanner import CustomScanner
 from startup_risk.scanners.dependency_scanner import DependencyRiskScanner
 from startup_risk.scanners.dependency_vuln_scanner import DependencyVulnScanner
 from startup_risk.scanners.financial_compliance_scanner import FinancialComplianceScanner
+from startup_risk.scanners.infra_agent import InfraMisconfigAgent
 from startup_risk.scanners.license_scanner import LicenseRiskScanner
 from startup_risk.scanners.outdated_deps_scanner import OutdatedDepsScanner
+from startup_risk.scanners.pii_agent import PIIDataFlowAgent
 from startup_risk.scanners.repo_inventory import RepoInventoryScanner
 from startup_risk.scanners.secret_scanner import SecretScanner
 from startup_risk.scanners.static_hygiene import StaticHygieneScanner
+from startup_risk.scanners.vuln_exploitability_agent import VulnExploitabilityAgent
 
 
 def default_scanners(
@@ -53,6 +57,11 @@ def default_scanners(
         DependencyVulnScanner(enable_osv=vuln_osv),
         OutdatedDepsScanner(enable_registry=outdated_registry),
         CodeComplianceScanner(),
+        # LLM reasoning agents. Each is no-op safe: returns [] without an LLM key.
+        AuthAccessControlAgent(),
+        PIIDataFlowAgent(),
+        InfraMisconfigAgent(),
+        VulnExploitabilityAgent(enable_osv=vuln_osv),
         FinancialComplianceScanner(funding_round=funding_round),
         # Opt-in: returns [] unless a questionnaire/PRD and an LLM are available.
         CustomScanner(

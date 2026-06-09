@@ -1,9 +1,8 @@
 import json
 import re
 
-from openai import OpenAI
-
-from .config import OPENAI_MODEL, SUMMARY_SYSTEM_PROMPT, COMPLIANCE_QUESTIONS_PROMPT
+from .config import SUMMARY_SYSTEM_PROMPT, COMPLIANCE_QUESTIONS_PROMPT
+from .llm import ChatClient
 from .models import Bill, BillSummary, ComplianceQuestion
 
 MAX_CHARS = 80000
@@ -38,9 +37,8 @@ def _bill_text(bill: Bill) -> str:
     )
 
 
-def summarize_bill(client: OpenAI, bill: Bill) -> BillSummary:
-    response = client.chat.completions.create(
-        model=OPENAI_MODEL,
+def summarize_bill(client: ChatClient, bill: Bill) -> BillSummary:
+    response = client.complete(
         max_tokens=800,
         response_format={"type": "json_object"},
         messages=[
@@ -49,7 +47,7 @@ def summarize_bill(client: OpenAI, bill: Bill) -> BillSummary:
         ],
     )
 
-    raw = response.choices[0].message.content
+    raw = response.content
     try:
         parsed = json.loads(raw)
     except Exception:
@@ -67,24 +65,23 @@ def summarize_bill(client: OpenAI, bill: Bill) -> BillSummary:
     return BillSummary(
         bill_id=bill.bill_id,
         summary_text=summary_text,
-        model_used=OPENAI_MODEL,
+        model_used=response.model,
         cache_hit=False,
-        input_tokens=response.usage.prompt_tokens,
-        output_tokens=response.usage.completion_tokens,
+        input_tokens=response.usage.input_tokens or 0,
+        output_tokens=response.usage.output_tokens or 0,
         metadata=metadata,
     )
 
 
-def generate_compliance_questions(client: OpenAI, bill: Bill) -> list:
-    response = client.chat.completions.create(
-        model=OPENAI_MODEL,
+def generate_compliance_questions(client: ChatClient, bill: Bill) -> list:
+    response = client.complete(
         max_tokens=512,
         messages=[
             {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
             {"role": "user", "content": _bill_text(bill) + "\n\n" + COMPLIANCE_QUESTIONS_PROMPT},
         ],
     )
-    raw = response.choices[0].message.content
+    raw = response.content
     parsed = re.findall(r"^\d+\.\s+(.+)$", raw, re.MULTILINE)
     return [
         ComplianceQuestion(
@@ -96,7 +93,7 @@ def generate_compliance_questions(client: OpenAI, bill: Bill) -> list:
     ]
 
 
-def process_bill(client: OpenAI, bill: Bill) -> tuple:
+def process_bill(client: ChatClient, bill: Bill) -> tuple:
     summary = summarize_bill(client, bill)
     questions = generate_compliance_questions(client, bill)
     return summary, questions

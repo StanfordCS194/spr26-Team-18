@@ -1,4 +1,5 @@
 import json as _json
+import sys
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Optional
@@ -6,14 +7,14 @@ from typing import Optional
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
 from app.ranking import rank_bills
-from .config import OPENAI_MODEL, load_config
+from .config import load_config
 from .grader import grade_company
 from .legal_intelligence import detect_industry, calculate_savings
+from .llm import LLMConfigError, LLMProviderCapabilityError, get_chat_client
 from .storage import init_db, get_all_bills, get_bill_with_summary_and_questions
 
 app = FastAPI(title="Legi-Bill API")
@@ -272,6 +273,8 @@ def _bill_details_payload(bill_number: str) -> dict:
 def match_chat(
     messages: str = Form(...),
     file: Optional[UploadFile] = File(None),
+    llm_provider: Optional[str] = Form(None),
+    llm_model: Optional[str] = Form(None),
 ):
     try:
         history = _json.loads(messages)
@@ -296,40 +299,38 @@ def match_chat(
                 }
                 break
 
-    cfg = load_config()
-    api_key = cfg.get("openai_api_key", "")
-    if not api_key or api_key.startswith("stub"):
-        raise HTTPException(
-            503,
-            "OPENAI_API_KEY is not configured. Set a real key in .env to enable chat.",
-        )
-
-    client = OpenAI(api_key=api_key)
+    try:
+        client = get_chat_client(provider=llm_provider, model=llm_model)
+    except LLMConfigError as e:
+        raise HTTPException(503, str(e)) from e
     full = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}, *history]
     matches: Optional[list] = None
 
     for _ in range(3):
         try:
-            response = client.chat.completions.create(
-                model=OPENAI_MODEL,
+            response = client.complete(
                 messages=full,
                 tools=CHAT_TOOLS,
                 tool_choice="auto",
             )
+        except LLMProviderCapabilityError as e:
+            raise HTTPException(400, str(e)) from e
         except Exception as e:
-            raise HTTPException(502, f"OpenAI API error: {e}")
+            raise HTTPException(502, f"LLM API error: {e}")
 
-        msg = response.choices[0].message
+        tool_calls = response.tool_calls or []
 
-        if msg.tool_calls:
+        if tool_calls:
             full.append({
                 "role": "assistant",
-                "content": msg.content or "",
-                "tool_calls": [tc.model_dump() for tc in msg.tool_calls],
+                "content": response.content or "",
+                "tool_calls": tool_calls,
             })
-            for tc in msg.tool_calls:
-                args = _json.loads(tc.function.arguments or "{}")
-                if tc.function.name == "run_match":
+            for tc in tool_calls:
+                function = tc.get("function", {}) if isinstance(tc, dict) else {}
+                args = _json.loads(function.get("arguments") or "{}")
+                function_name = function.get("name")
+                if function_name == "run_match":
                     matches = _rank_for_description(args.get("description", ""))
                     tool_result = {
                         "matches_returned": len(matches),
@@ -338,18 +339,18 @@ def match_chat(
                             for m in matches[:5]
                         ],
                     }
-                elif tc.function.name == "get_bill_details":
+                elif function_name == "get_bill_details":
                     tool_result = _bill_details_payload(args.get("bill_number", ""))
                 else:
-                    tool_result = {"error": f"unknown tool {tc.function.name}"}
+                    tool_result = {"error": f"unknown tool {function_name}"}
                 full.append({
                     "role": "tool",
-                    "tool_call_id": tc.id,
+                    "tool_call_id": tc.get("id", "") if isinstance(tc, dict) else "",
                     "content": _json.dumps(tool_result),
                 })
             continue
 
-        return {"message": msg.content or "", "matches": matches}
+        return {"message": response.content or "", "matches": matches}
 
     raise HTTPException(500, "Chat tool-call loop did not converge")
 
@@ -358,6 +359,8 @@ def match_chat(
 def grade(
     company_text: Optional[str] = Form(None),
     company_name: Optional[str] = Form(None),
+    llm_provider: Optional[str] = Form(None),
+    llm_model: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
 ):
     """Score a company across the 5 regulatory exposure axes with evidence.
@@ -383,14 +386,6 @@ def grade(
             detail="Provide a non-empty file or company_text.",
         )
 
-    cfg = load_config()
-    api_key = cfg.get("openai_api_key", "")
-    if not api_key or api_key.startswith("stub"):
-        raise HTTPException(
-            503,
-            "OPENAI_API_KEY is not configured. Set a real key in .env to enable grading.",
-        )
-
     # Use the same enrichment pattern as /api/match — bills + their summary text
     # if available — so the ranker has the richest possible corpus to match against.
     conn = get_conn()
@@ -404,8 +399,10 @@ def grade(
     name = company_name or (fname.rsplit(".", 1)[0] if fname else None)
 
     try:
-        client = OpenAI(api_key=api_key)
+        client = get_chat_client(provider=llm_provider, model=llm_model)
         result = grade_company(client, enriched, text, company_name=name)
+    except LLMConfigError as e:
+        raise HTTPException(503, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
@@ -446,16 +443,79 @@ class StartupSummaryRequest(BaseModel):
     composite: int
     axes: dict
     top_actions: list
+    llm_provider: str | None = None
+    llm_model: str | None = None
+
+
+class LicenseScanOptions(BaseModel):
+    deterministic_only: bool = False
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    batch_timeout_hours: float = 24
+    poll_interval_seconds: int = 60
+    registry_metadata: bool = False
+    artifact_inspection: bool = False
+    source_repo: bool = False
+
+
+class LicenseScanRequest(BaseModel):
+    repo_path: str
+    options: LicenseScanOptions = Field(default_factory=LicenseScanOptions)
+
+
+@app.post("/api/startup/license/scan")
+def startup_license_scan(req: LicenseScanRequest):
+    """Run the startup-risk license scanner with path-safe local/GitHub targets."""
+    startup_risk_root = Path(__file__).resolve().parents[1] / "startup-risk"
+    if str(startup_risk_root) not in sys.path:
+        sys.path.insert(0, str(startup_risk_root))
+
+    from startup_risk.core.engine import ScanEngine
+    from startup_risk.ingest.repository import RepositoryIngestor
+    from startup_risk.outputs.json_output import result_to_json
+    from startup_risk.scanners.license_scanner import LicenseRiskScanner
+
+    target = req.repo_path.strip()
+    if not target:
+        raise HTTPException(400, "repo_path is required.")
+    if req.options.deterministic_only is False and req.options.batch_timeout_hours <= 0:
+        raise HTTPException(400, "batch_timeout_hours must be positive.")
+
+    if target.startswith(("http://", "https://")):
+        safe_target = target
+    else:
+        workspace_root = Path(__file__).resolve().parents[1]
+        candidate = Path(target).expanduser().resolve()
+        if workspace_root not in candidate.parents and candidate != workspace_root:
+            raise HTTPException(400, "Local repo_path must be inside the workspace root.")
+        safe_target = str(candidate)
+
+    scanner = LicenseRiskScanner(
+        deterministic_only=req.options.deterministic_only,
+        provider_name=req.options.llm_provider,
+        model_name=req.options.llm_model,
+        batch_timeout_seconds=int(req.options.batch_timeout_hours * 60 * 60),
+        poll_interval_seconds=req.options.poll_interval_seconds,
+        enable_registry_metadata=req.options.registry_metadata,
+        enable_artifact_inspection=req.options.artifact_inspection,
+        enable_source_repo=req.options.source_repo,
+    )
+    try:
+        result = ScanEngine(
+            ingestor=RepositoryIngestor(max_file_bytes=2_000_000),
+            scanners=[scanner],
+        ).scan(safe_target)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"License scan failed: {exc}") from exc
+
+    return _json.loads(result_to_json(result))
 
 
 @app.post("/api/startup/summary")
 def startup_summary(req: StartupSummaryRequest):
     """Synthesize a short verdict over the deterministic startup-health grade."""
-    cfg = load_config()
-    api_key = cfg.get("openai_api_key", "")
-    if not api_key or api_key.startswith("stub"):
-        raise HTTPException(503, "OPENAI_API_KEY not configured.")
-
     lines = [
         f"Startup: {req.name}",
         f"Composite grade: {req.grade} ({req.composite}/100)",
@@ -486,9 +546,8 @@ def startup_summary(req: StartupSummaryRequest):
     )
 
     try:
-        client = OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
-            model=cfg.get("openai_model", OPENAI_MODEL) or "gpt-4o-mini",
+        client = _get_llm_client(provider=req.llm_provider, model=req.llm_model)
+        resp = client.complete(
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": "\n".join(lines)},
@@ -496,11 +555,196 @@ def startup_summary(req: StartupSummaryRequest):
             temperature=0.4,
             max_tokens=180,
         )
-        verdict = (resp.choices[0].message.content or "").strip()
+        verdict = (resp.content or "").strip()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(502, f"Summary generation failed: {e}")
 
-    return {"verdict": verdict, "model": cfg.get("openai_model", OPENAI_MODEL)}
+    return {"verdict": verdict, "model": resp.model, "provider": resp.provider}
+
+
+class StartupCustomRulesRequest(BaseModel):
+    questionnaire: dict  # { stage, customers, sensitive_data, regulated_industry, gtm, ... }
+    prd_text: Optional[str] = None
+    github_summary: Optional[dict] = None  # passed through so rules can reference repo facts
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+
+
+class StartupCustomGradeRequest(BaseModel):
+    rules: list  # [{id, title, weight, what_to_check, fix}]
+    prd_text: Optional[str] = None
+    github_summary: Optional[dict] = None
+    spreadsheet_summary: Optional[dict] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+
+
+def _get_llm_client(provider: str | None = None, model: str | None = None):
+    try:
+        return get_chat_client(provider=provider, model=model)
+    except LLMConfigError as e:
+        raise HTTPException(503, str(e)) from e
+
+
+@app.post("/api/startup/custom-rules")
+def startup_custom_rules(req: StartupCustomRulesRequest):
+    """LLM writes a tailored ruleset for this specific startup.
+
+    Inputs: a short questionnaire + (optionally) the PRD. Output: a JSON list
+    of 5-8 rules with id, title, weight, what_to_check (criteria the grader will
+    use), and a fix. These rules form the "custom" axis in the rubric.
+    """
+    q = req.questionnaire or {}
+    lines = ["Founder questionnaire:"]
+    for k, v in q.items():
+        if v:
+            lines.append(f"  - {k}: {v}")
+    if req.prd_text:
+        excerpt = req.prd_text[:4000]
+        lines += ["", "PRD excerpt:", excerpt]
+    if req.github_summary:
+        gh = req.github_summary
+        lines += [
+            "",
+            "Repo facts:",
+            f"  - name: {gh.get('fullName')}",
+            f"  - language: {gh.get('language')}",
+            f"  - license: {gh.get('license')}",
+            f"  - files: {', '.join((gh.get('filenames') or [])[:20])}",
+        ]
+    user_msg = "\n".join(lines)
+
+    system = (
+        "You are a startup diligence expert. Given a founder's questionnaire and PRD, "
+        "write a CUSTOM ruleset of 5-8 specific, checkable rules that matter for THIS "
+        "product (not generic best practices already covered by a stock rubric: license, "
+        "tests, README, runway, GDPR/CCPA/COPPA, PRD completeness). Focus on what's unique "
+        "to their stage, customer, industry, data, and GTM. Each rule must be verifiable "
+        "from the PRD text or repo facts a grader will be shown. "
+        "Return ONLY a JSON object: "
+        '{"rules": [{"id": "snake_case_id", "title": "short rule title", '
+        '"weight": 5-20, "what_to_check": "explicit criteria the grader will use", '
+        '"fix": "one-line concrete remediation"}]}. No prose, no markdown fences.'
+    )
+
+    try:
+        client = _get_llm_client(provider=req.llm_provider, model=req.llm_model)
+        resp = client.complete(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.3,
+            max_tokens=900,
+            response_format={"type": "json_object"},
+        )
+        raw = (resp.content or "").strip()
+        parsed = _json.loads(raw)
+        rules = parsed.get("rules") or []
+        if not isinstance(rules, list) or not rules:
+            raise ValueError("LLM returned no rules")
+        cleaned = []
+        for i, r in enumerate(rules[:8]):
+            cleaned.append({
+                "id": str(r.get("id") or f"custom_{i}")[:64],
+                "title": str(r.get("title") or "")[:140],
+                "weight": max(1, min(25, int(r.get("weight") or 8))),
+                "what_to_check": str(r.get("what_to_check") or "")[:600],
+                "fix": str(r.get("fix") or "")[:240],
+            })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Rule generation failed: {e}")
+
+    return {"rules": cleaned, "model": resp.model, "provider": resp.provider}
+
+
+@app.post("/api/startup/custom-grade")
+def startup_custom_grade(req: StartupCustomGradeRequest):
+    """LLM grades the repo + PRD against the custom rules. Returns pass/fail
+    per rule with evidence ('observed') the user will see in the drilldown.
+    """
+    if not req.rules:
+        raise HTTPException(400, "No rules to grade against.")
+
+    lines = ["Rules to evaluate:"]
+    for r in req.rules:
+        lines.append(
+            f"  - id={r.get('id')} | title={r.get('title')} | check: {r.get('what_to_check')}"
+        )
+
+    lines.append("")
+    lines.append("Evidence available:")
+    if req.prd_text:
+        lines += ["PRD:", req.prd_text[:4000]]
+    if req.github_summary:
+        gh = req.github_summary
+        lines += [
+            "",
+            "Repo:",
+            f"  name={gh.get('fullName')} language={gh.get('language')} license={gh.get('license')}",
+            f"  files: {', '.join((gh.get('filenames') or [])[:30])}",
+            f"  hasCI={gh.get('hasCI')} hasTests={gh.get('hasTests')} hasEnvFile={gh.get('hasEnvFile')}",
+            f"  contributors={gh.get('contributorCount')} daysSincePush={gh.get('daysSincePush')}",
+            f"  readme excerpt: {(gh.get('readmeText') or '')[:800]}",
+        ]
+    if req.spreadsheet_summary:
+        s = req.spreadsheet_summary
+        lines += [
+            "",
+            "Finance:",
+            f"  rows={s.get('rowCount')} runway_months={s.get('runway')} "
+            f"monthlyRevenue={s.get('monthlyRevenue')} hasCategories={s.get('hasCategories')}",
+        ]
+
+    user_msg = "\n".join(lines)
+
+    system = (
+        "You are evaluating a startup against a CUSTOM ruleset. For each rule, decide "
+        "passed=true/false STRICTLY from the evidence shown. If evidence is missing, "
+        "passed=false and say so in observed. Never invent facts. "
+        "Return ONLY JSON: "
+        '{"results": [{"id": "<rule id>", "passed": bool, '
+        '"observed": "<1 short sentence of evidence>"}]}. '
+        "Include every rule id exactly once. No markdown fences."
+    )
+
+    try:
+        client = _get_llm_client(provider=req.llm_provider, model=req.llm_model)
+        resp = client.complete(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.1,
+            max_tokens=900,
+            response_format={"type": "json_object"},
+        )
+        raw = (resp.content or "").strip()
+        parsed = _json.loads(raw)
+        results = parsed.get("results") or []
+        by_id = {str(r.get("id")): r for r in results if isinstance(r, dict)}
+        cleaned = []
+        for r in req.rules:
+            rid = str(r.get("id"))
+            hit = by_id.get(rid) or {}
+            cleaned.append({
+                "id": rid,
+                "title": r.get("title"),
+                "weight": r.get("weight"),
+                "passed": bool(hit.get("passed", False)),
+                "observed": str(hit.get("observed") or "no evidence found")[:240],
+                "fix": r.get("fix") or "",
+            })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Custom grading failed: {e}")
+
+    return {"results": cleaned, "model": resp.model, "provider": resp.provider}
 
 
 @app.get("/api/bills/{bill_number}")
@@ -566,3 +810,107 @@ def legal_savings(
         state=state,
         hourly_rate_override=hourly_rate,
     )
+
+
+# ── /api/scan ─────────────────────────────────────────────────────────────────
+
+class RepoScanRequest(BaseModel):
+    repo_url: str
+    industry: Optional[str] = None
+    product_name: Optional[str] = None
+    vuln_osv: bool = True
+    outdated_registry: bool = False
+    # Optional founder questionnaire + PRD that drive the AI-tailored CustomScanner.
+    # When omitted, the custom scanner is a no-op (returns no findings).
+    questionnaire: Optional[dict] = None
+    prd_text: Optional[str] = None
+
+
+@app.post("/api/scan")
+def scan_repo(req: RepoScanRequest):
+    """Run all startup-risk scanners on a public GitHub repository."""
+    import time
+    import re as _re
+
+    startup_risk_root = Path(__file__).resolve().parents[1] / "startup-risk"
+    if str(startup_risk_root) not in sys.path:
+        sys.path.insert(0, str(startup_risk_root))
+
+    try:
+        from startup_risk.core.engine import ScanEngine
+        from startup_risk.ingest.repository import RepositoryIngestor
+        from startup_risk.scanners.registry import default_scanners
+    except ImportError as exc:
+        raise HTTPException(500, f"startup-risk module not available: {exc}") from exc
+
+    # Validate: public GitHub HTTPS URL only
+    if not _re.match(r"^https://github\.com/[\w.\-]+/[\w.\-]+(/?)?$", req.repo_url.strip()):
+        raise HTTPException(400, "Only public GitHub HTTPS URLs are supported.")
+
+    start = time.time()
+    try:
+        scanners = default_scanners(
+            deterministic_license_only=True,
+            vuln_osv=req.vuln_osv,
+            outdated_registry=req.outdated_registry,
+            custom_questionnaire=req.questionnaire,
+            custom_prd_text=req.prd_text,
+        )
+        result = ScanEngine(
+            ingestor=RepositoryIngestor(),
+            scanners=scanners,
+        ).scan(req.repo_url.strip())
+    except Exception as exc:
+        raise HTTPException(502, f"Scan failed: {exc}") from exc
+
+    elapsed = round(time.time() - start, 1)
+
+    # Transform Finding objects into the frontend-expected shape
+    def _finding_to_dict(f) -> dict:
+        evidence = []
+        for ev in (f.evidence or []):
+            loc = ev.location
+            evidence.append({
+                "file": loc.path if loc else None,
+                "line": loc.line_start if loc else None,
+                "excerpt": ev.excerpt or ev.description,
+            })
+        return {
+            "id": f.id,
+            "title": f.title,
+            "description": f.description,
+            "category": f.category,
+            "severity": f.severity,
+            "confidence": f.confidence,
+            "evidence": evidence,
+            "recommendation": f.recommendation,
+            "scanner": f.scanner_id,
+        }
+
+    findings = [_finding_to_dict(f) for f in result.findings]
+
+    # Trivy comparison metadata — precomputed from our benchmark run
+    _TRIVY_KNOWN = {
+        "django/django": {
+            "trivy_findings": 0,
+            "trivy_vulns": 0,
+            "trivy_secrets": 0,
+            "trivy_note": "Trivy scanned django/django and found 0 vulnerabilities. It missed GHSA-27jp-wm6q-gp25 because its uv lockfile parser does not read optional dependencies declared in pyproject.toml.",
+        },
+    }
+    slug = "/".join(req.repo_url.strip().rstrip("/").split("/")[-2:])
+    trivy_comparison = _TRIVY_KNOWN.get(slug)
+
+    our_vulns = sum(1 for f in findings if f["category"] == "dependency_vulnerability")
+    our_secrets = sum(1 for f in findings if f["category"] == "secret_exposure")
+
+    return {
+        "repo": slug,
+        "findings": findings,
+        "summary": result.summary.model_dump(),
+        "timing_seconds": elapsed,
+        "scanners_run": list({f["scanner"] for f in findings}),
+        "trivy_comparison": trivy_comparison,
+        "our_vuln_count": our_vulns,
+        "our_secret_count": our_secrets,
+    }

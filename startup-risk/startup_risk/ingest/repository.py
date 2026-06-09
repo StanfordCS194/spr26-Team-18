@@ -21,6 +21,18 @@ DEFAULT_IGNORED_DIRS = {
     "venv",
 }
 
+STRUCTURED_DEPENDENCY_FILES = {
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "cargo.lock",
+    "poetry.lock",
+    "pipfile.lock",
+    "uv.lock",
+    "composer.lock",
+    "packages.lock.json",
+}
+
 
 class RepositoryIngestor:
     """Builds static repository snapshots without executing scanned code."""
@@ -29,9 +41,11 @@ class RepositoryIngestor:
         self,
         *,
         max_file_bytes: int = 256_000,
+        structured_max_file_bytes: int = 25_000_000,
         ignored_dirs: set[str] | None = None,
     ) -> None:
         self.max_file_bytes = max_file_bytes
+        self.structured_max_file_bytes = structured_max_file_bytes
         self.ignored_dirs = ignored_dirs or DEFAULT_IGNORED_DIRS
 
     def ingest(self, target: str) -> RepositorySnapshot:
@@ -89,13 +103,22 @@ class RepositoryIngestor:
         relative_path = path.relative_to(root).as_posix()
         size_bytes = path.stat().st_size
 
-        if size_bytes > self.max_file_bytes:
+        max_bytes = self.max_file_bytes
+        if path.name.lower() in STRUCTURED_DEPENDENCY_FILES:
+            max_bytes = max(max_bytes, self.structured_max_file_bytes)
+
+        if size_bytes > max_bytes:
+            reason = (
+                "structured dependency file exceeds structured_max_file_bytes"
+                if path.name.lower() in STRUCTURED_DEPENDENCY_FILES
+                else "file exceeds max_file_bytes"
+            )
             return FileSnapshot(
                 path=relative_path,
                 size_bytes=size_bytes,
                 extension=path.suffix.lower(),
                 is_binary=False,
-                skipped_reason="file exceeds max_file_bytes",
+                skipped_reason=reason,
             )
 
         raw = path.read_bytes()

@@ -78,6 +78,8 @@ export async function extractGithub(rawUrl) {
   const repoFiles = selectRepoFiles(treeRes?.tree || []);
   const scannedFiles = await fetchRepoFiles(owner, repo, meta.default_branch || "main", repoFiles);
   const complianceFindings = scanRepoCompliance(scannedFiles);
+  const licenseScan = await scanLicenseRisk(meta.html_url || `https://github.com/${owner}/${repo}`);
+  const licenseFindings = licenseScan.findings || [];
 
   return {
     owner,
@@ -106,6 +108,10 @@ export async function extractGithub(rawUrl) {
     complianceFindings,
     highComplianceFindingCount: complianceFindings.filter((f) => f.severity === "high").length,
     mediumComplianceFindingCount: complianceFindings.filter((f) => f.severity === "medium").length,
+    licenseScanState: licenseScan.state,
+    licenseFindings,
+    highLicenseFindingCount: licenseFindings.filter((f) => f.severity === "high").length,
+    mediumLicenseFindingCount: licenseFindings.filter((f) => f.severity === "medium").length,
   };
 }
 
@@ -313,6 +319,32 @@ function redactSecret(text) {
   return text.replace(/(['\"])[^'\"\s]{8,}(['\"])/g, "$1[redacted]$2");
 }
 
+async function scanLicenseRisk(repoUrl) {
+  try {
+    const response = await fetch("/api/startup/license/scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repo_path: repoUrl,
+        options: {
+          deterministic_only: true,
+        },
+      }),
+    });
+    if (!response.ok) {
+      return { state: "unavailable", findings: [] };
+    }
+    const data = await response.json();
+    return {
+      state: "ok",
+      findings: (data.findings || []).filter((finding) => finding.category === "license_risk"),
+      summary: data.summary || null,
+    };
+  } catch {
+    return { state: "error", findings: [] };
+  }
+}
+
 // ---- PRD ----
 
 export async function extractPRD(file) {
@@ -373,6 +405,7 @@ export function analyzePRD(text, filename = "PRD") {
     mentionsTrademark: /\b(trademark|tm|copyright|intellectual property|\bIP\b)/i.test(text),
     mentionsEntity: /\b(inc\.?|llc|corp\.?|corporation|delaware c-?corp)\b/i.test(text),
     excerpt: text.slice(0, 280),
+    text,
   };
 }
 

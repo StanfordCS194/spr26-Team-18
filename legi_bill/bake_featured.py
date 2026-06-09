@@ -16,11 +16,10 @@ import sys
 import time
 from pathlib import Path
 
-from openai import OpenAI
-
 from .config import load_config
 from .fetch_10k import FEATURED_COMPANIES, fetch_10k_text
 from .grader import grade_company
+from .llm import get_chat_client
 from .storage import init_db, get_all_bills, get_bill_with_summary_and_questions
 
 
@@ -39,7 +38,7 @@ def bake() -> None:
 
     print(f"Loaded {len(bills)} bills from DB.", file=sys.stderr)
 
-    client = OpenAI(api_key=cfg["openai_api_key"])
+    client = get_chat_client()
 
     out = {}
     for c in FEATURED_COMPANIES:

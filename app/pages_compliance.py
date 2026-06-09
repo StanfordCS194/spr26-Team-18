@@ -2,10 +2,9 @@ import json
 from typing import Optional
 
 import streamlit as st
-from openai import OpenAI
 
 from app.pdf_utils import extract_text
-from legi_bill.config import OPENAI_MODEL, load_config
+from legi_bill.llm import get_chat_client
 
 SYSTEM_PROMPT = """You are a financial compliance analyst assisting a company with IRS-related reporting and tax compliance.
 
@@ -45,12 +44,7 @@ Analyze the document and return the JSON payload exactly as described above. If 
 
 
 def run_irs_compliance_audit(document_text: str, company_name: Optional[str] = None) -> dict:
-    cfg = load_config()
-    api_key = cfg.get("openai_api_key", "")
-    if not api_key or api_key.startswith("stub"):
-        raise ValueError("OPENAI_API_KEY is not configured. Set it in .env to enable IRS compliance auditing.")
-
-    client = OpenAI(api_key=api_key)
+    client = get_chat_client()
     audit_text = document_text.strip()
     if len(audit_text) > 30000:
         audit_text = audit_text[:30000] + "\n\n[TRUNCATED: document exceeded 30,000 characters]"
@@ -60,8 +54,7 @@ def run_irs_compliance_audit(document_text: str, company_name: Optional[str] = N
         document_text=audit_text,
     )
 
-    response = client.chat.completions.create(
-        model=OPENAI_MODEL,
+    response = client.complete(
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
@@ -70,7 +63,7 @@ def run_irs_compliance_audit(document_text: str, company_name: Optional[str] = N
         response_format={"type": "json_object"},
     )
 
-    content = response.choices[0].message.content or "{}"
+    content = response.content or "{}"
     return json.loads(content)
 
 

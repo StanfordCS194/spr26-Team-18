@@ -35,6 +35,18 @@ def test_json_output_is_deterministic_and_sorted():
                 scanner_version="1.0.0",
             ),
             Finding(
+                id="c.finding",
+                title="C",
+                description="High finding.",
+                category="test",
+                severity="high",
+                confidence="high",
+                evidence=[FindingEvidence(description="C evidence.")],
+                recommendation="Review C.",
+                scanner_id="test",
+                scanner_version="1.0.0",
+            ),
+            Finding(
                 id="a.finding",
                 title="A",
                 description="First finding.",
@@ -54,7 +66,7 @@ def test_json_output_is_deterministic_and_sorted():
                 "info": 1,
                 "low": 1,
                 "medium": 0,
-                "high": 0,
+                "high": 1,
                 "critical": 0,
             },
         ),
@@ -66,7 +78,7 @@ def test_json_output_is_deterministic_and_sorted():
     assert first == second
     parsed = json.loads(first)
     assert list(parsed.keys()) == ["findings", "inventory", "scanned_at", "source", "summary"]
-    assert [finding["id"] for finding in parsed["findings"]] == ["a.finding", "b.finding"]
+    assert [finding["id"] for finding in parsed["findings"]] == ["c.finding", "b.finding", "a.finding"]
 
 
 def test_repository_snapshot_output_excludes_local_root():

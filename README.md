@@ -11,7 +11,7 @@ pip install -r requirements.txt
 
 **2. Install frontend dependencies**
 ```bash
-cd frontend && npm install
+cd frontend-b && npm install
 ```
 
 **3. Configure API keys**
@@ -33,7 +33,7 @@ python3 -m uvicorn legi_bill.api:app --reload --port 8000
 
 **Terminal 2 — React frontend:**
 ```bash
-cd frontend && npm run dev
+cd frontend-b && npm run dev
 ```
 
 Open [http://localhost:5173](http://localhost:5173).

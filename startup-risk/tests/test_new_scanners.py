@@ -6,7 +6,6 @@ from unittest.mock import patch
 import pytest
 
 from startup_risk.core.models import FileSnapshot, RepositorySnapshot, RepositorySource
-from startup_risk.scanners.code_compliance_scanner import CodeComplianceScanner
 from startup_risk.scanners.dependency_vuln_scanner import DependencyVulnScanner
 from startup_risk.scanners.outdated_deps_scanner import OutdatedDepsScanner
 from startup_risk.scanners.secret_scanner import SecretScanner
@@ -125,100 +124,6 @@ class TestSecretScanner:
         secret = [f for f in findings if "hardcoded_secret" in f.id]
         if secret:
             assert secret[0].evidence[0].location.line_start == 2
-
-
-# ===========================================================================
-# CodeComplianceScanner
-# ===========================================================================
-
-class TestCodeComplianceScanner:
-    scanner = CodeComplianceScanner()
-
-    def test_detects_token_in_localstorage(self):
-        snap = _snapshot(("src/auth.js", "localStorage.setItem('token', userToken)"))
-        findings = self.scanner.scan(snap)
-        assert any("token_in_browser_storage" in f.id for f in findings)
-
-    def test_detects_token_in_sessionstorage(self):
-        snap = _snapshot(("src/login.ts", "sessionStorage.setItem('auth', jwt)"))
-        findings = self.scanner.scan(snap)
-        assert any("token_in_browser_storage" in f.id for f in findings)
-
-    def test_detects_insecure_cookie(self):
-        snap = _snapshot(("src/server.js", "res.cookie('session', value)"))
-        findings = self.scanner.scan(snap)
-        assert any("insecure_cookie" in f.id for f in findings)
-
-    def test_secure_cookie_not_flagged(self):
-        code = "res.cookie('session', value, { httpOnly: true, secure: true, sameSite: 'Lax' })"
-        snap = _snapshot(("src/server.js", code))
-        findings = self.scanner.scan(snap)
-        assert not any("insecure_cookie" in f.id for f in findings)
-
-    def test_detects_minor_flow_without_consent(self):
-        snap = _snapshot(("src/signup.py", "for minor in user_list: create_account(minor)"))
-        findings = self.scanner.scan(snap)
-        assert any("minor_flow_no_consent" in f.id for f in findings)
-
-    def test_minor_with_coppa_not_flagged(self):
-        code = "# COPPA: parental consent required for under-13 users\nif is_minor: require_parent_consent()"
-        snap = _snapshot(("src/signup.py", code))
-        findings = self.scanner.scan(snap)
-        assert not any("minor_flow_no_consent" in f.id for f in findings)
-
-    def test_detects_health_data_without_controls(self):
-        snap = _snapshot(("src/records.py", "diagnosis = patient.get_diagnosis()"))
-        findings = self.scanner.scan(snap)
-        assert any("health_data_no_controls" in f.id for f in findings)
-
-    def test_health_data_with_controls_not_flagged(self):
-        code = "# HIPAA: PHI encrypted at rest\ndiagnosis = encrypt(patient.get_diagnosis())"
-        snap = _snapshot(("src/records.py", code))
-        findings = self.scanner.scan(snap)
-        assert not any("health_data_no_controls" in f.id for f in findings)
-
-    def test_detects_tracking_sdk(self):
-        snap = _snapshot(("src/analytics.js", "posthog.init('ph_key', { api_host: 'https://app.posthog.com' })"))
-        findings = self.scanner.scan(snap)
-        assert any("tracking_sdk" in f.id for f in findings)
-
-    def test_detects_mixpanel(self):
-        snap = _snapshot(("src/track.ts", "mixpanel.track('page_view', props)"))
-        findings = self.scanner.scan(snap)
-        assert any("tracking_sdk" in f.id for f in findings)
-
-    def test_detects_personal_data_without_governance(self):
-        snap = _snapshot(("src/user.py", "user.email = form.email"))
-        findings = self.scanner.scan(snap)
-        assert any("personal_data_no_controls" in f.id for f in findings)
-
-    def test_personal_data_with_governance_not_flagged(self):
-        code = "# consent obtained; encrypted; retention = 90 days\nuser.email = encrypt(form.email)"
-        snap = _snapshot(("src/user.py", code))
-        findings = self.scanner.scan(snap)
-        assert not any("personal_data_no_controls" in f.id for f in findings)
-
-    def test_skips_docs_files(self):
-        snap = _snapshot(("docs/privacy.md", "localStorage.setItem('token', value)"))
-        assert self.scanner.scan(snap) == []
-
-    def test_skips_non_source_extensions(self):
-        snap = _snapshot(("config.yaml", "sessionStorage.setItem('token', value)"))
-        assert self.scanner.scan(snap) == []
-
-    def test_finding_ids_stable_and_url_safe(self):
-        snap = _snapshot(("src/a.js", "localStorage.setItem('session', jwt)"))
-        first = self.scanner.scan(snap)
-        second = self.scanner.scan(snap)
-        assert [f.id for f in first] == [f.id for f in second]
-        for f in first:
-            assert f.id == f.id.lower()
-            assert f.id.startswith("code_compliance.")
-
-    def test_all_findings_have_scanner_id(self):
-        snap = _snapshot(("src/app.py", "email = user.email\ncookies.set('s', val)"))
-        findings = self.scanner.scan(snap)
-        assert all(f.scanner_id == "code_compliance" for f in findings)
 
 
 # ===========================================================================

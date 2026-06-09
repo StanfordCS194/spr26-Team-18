@@ -5,7 +5,7 @@ import {
   BookOpen, Code2, Cpu, Building2, Layers, ArrowLeft,
   ShieldAlert, FileSearch, Package, Lock, BarChart2,
   Loader2, ExternalLink, ChevronDown, ChevronUp,
-  KeyRound, Bug, RefreshCw, ShieldCheck,
+  KeyRound, Bug, RefreshCw, ShieldCheck, Sparkles,
 } from "lucide-react";
 
 // ── Industry verticals ────────────────────────────────────────────────────────
@@ -31,6 +31,7 @@ const BASE_SCANNERS = [
   { id: "dependency_vuln", label: "Dependency vulnerabilities", Icon: Bug,      desc: "Known CVEs via OSV database" },
   { id: "outdated_deps",   label: "Outdated dependencies",   Icon: RefreshCw,   desc: "Behind-latest packages per registry" },
   { id: "code_compliance", label: "Code compliance",         Icon: ShieldCheck, desc: "Privacy patterns, cookie flags, tracking SDKs" },
+  { id: "custom_compliance", label: "AI-tailored scan",      Icon: Sparkles,    desc: "Startup-specific rules from your profile" },
 ];
 
 // Industry-specific scanners shown as aspirational (coming soon) in the scanner preview
@@ -53,6 +54,7 @@ const SCANNER_LABELS = {
   dependency_vuln: "Dependency Vuln",
   outdated_deps:   "Outdated Deps",
   code_compliance: "Code Compliance",
+  custom_compliance: "AI-Tailored",
 };
 
 // ── Severity config ───────────────────────────────────────────────────────────
@@ -460,6 +462,15 @@ export default function RepoScanner({
           repo_url: scanUrl.trim(),
           industry: scanIndustry,
           product_name: scanProductName || undefined,
+          // Drives the AI-tailored CustomScanner using the onboarding profile.
+          questionnaire: {
+            industry: scanIndustry,
+            product_name: scanProductName || undefined,
+            stage: onboardingProfile?.stage,
+            customers: onboardingProfile?.customers,
+            sensitive_data: onboardingProfile?.sensitiveData,
+            gtm: onboardingProfile?.gtm,
+          },
         }),
       });
 

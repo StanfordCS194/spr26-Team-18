@@ -25,7 +25,7 @@ const INDUSTRIES = [
 // These match the actual scanner IDs in the backend.
 
 const BASE_SCANNERS = [
-  { id: "static_hygiene",  label: "Static hygiene",          Icon: FileSearch,  desc: "Missing files, sensitive filenames" },
+  { id: "static_hygiene",  label: "Repository hygiene",      Icon: FileSearch,  desc: "Missing files, sensitive filenames" },
   { id: "license_scanner", label: "License inventory",       Icon: Lock,        desc: "GPL · AGPL · copyleft obligations" },
   { id: "secret_scanner",  label: "Secret detection",        Icon: KeyRound,    desc: "Hardcoded keys, PEM certs, connection strings" },
   { id: "dependency_vuln", label: "Dependency vulnerabilities", Icon: Bug,      desc: "Known CVEs via OSV database" },
@@ -48,7 +48,7 @@ const INDUSTRY_SCANNERS = {
 
 // Human-readable scanner names for the FindingCard attribution badge
 const SCANNER_LABELS = {
-  static_hygiene:  "Static Hygiene",
+  static_hygiene:  "Repository Hygiene",
   license_scanner: "License",
   secret_scanner:  "Secret Scanner",
   dependency_vuln: "Dependency Vuln",
@@ -657,7 +657,7 @@ export default function RepoScanner({
         </button>
 
         <p className="text-[11px] text-text-muted leading-relaxed max-w-lg">
-          Only public GitHub repositories are supported. No code is executed — all analysis is static.
+          Only public GitHub repositories are supported. No code is executed — our agents read your repository, never run it.
           Findings are possible risk triggers, not legal conclusions.
         </p>
       </div>
@@ -788,7 +788,7 @@ const PLACEHOLDER_RESULTS = {
       evidence: [
         {
           location: null,
-          description: "No top-level SECURITY.md file was found in the static snapshot.",
+          description: "No top-level SECURITY.md file was found in the repository snapshot.",
           excerpt: null,
         },
       ],

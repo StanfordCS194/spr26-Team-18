@@ -11,6 +11,7 @@ frontend/.vite/
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
 
 # Generated scanner outputs
 startup-risk/reports/

@@ -32,6 +32,10 @@ def default_scanners(
     custom_questionnaire: dict | None = None,
     custom_prd_text: str | None = None,
     funding_round: str | None = None,
+    entity_type: str | None = None,
+    industry: str | None = None,
+    international: bool | None = None,
+    multi_state: bool | None = None,
 ) -> list[Scanner]:
     return [
         StaticHygieneScanner(),
@@ -53,7 +57,13 @@ def default_scanners(
         DependencyVulnScanner(enable_osv=vuln_osv),
         OutdatedDepsScanner(enable_registry=outdated_registry),
         CodeComplianceScanner(),
-        FinancialComplianceScanner(funding_round=funding_round),
+        FinancialComplianceScanner(
+            funding_round=funding_round,
+            entity_type=entity_type,
+            industry=industry,
+            international=international,
+            multi_state=multi_state,
+        ),
         # Opt-in: returns [] unless a questionnaire/PRD and an LLM are available.
         CustomScanner(
             questionnaire=custom_questionnaire,

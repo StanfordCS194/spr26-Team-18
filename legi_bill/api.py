@@ -840,6 +840,50 @@ _COMPLIANCE_SYSTEM = (
 )
 
 
+_INTL_KEYWORDS     = ("fbar", "fatca", "gilti", "§482", "transfer pricing", "cfc", "form 5471",
+                      "subpart f", "foreign subsidiary", "offshore", "international")
+_RD_KEYWORDS       = ("r&d", "§41", "§174", "research credit", "qre", "research expense",
+                      "development cost", "174 amortiz")
+_CORP_KEYWORDS     = ("qsbs", "§1202", "iso", "espp", "§422", "form 3921", "form 3922",
+                      "§280g", "§162(m)", "162(m)", "incentive stock")
+_STATE_KEYWORDS    = ("state income tax nexus", "apportionment", "state corporate",
+                      "throwback", "single sales factor")
+_RD_API_INDUSTRIES = frozenset({"saas", "software", "hardware", "iot", "biotech",
+                                 "life_sciences", "life sciences", "deeptech"})
+_SUB_API_INDUSTRIES = frozenset({"saas", "software", "fintech", "ecommerce", "marketplace"})
+
+
+def _filter_requirements(
+    requirements: list[str],
+    entity_type: str | None,
+    industry: str | None,
+    international: str | None,
+    multi_state: bool,
+) -> list[str]:
+    """Return only the compliance requirements applicable to this company's profile."""
+    ent = (entity_type or "").lower().replace("-", "_")
+    ind = (industry or "").lower().replace(" / ", "_").replace("/", "_").replace(" ", "_")
+
+    is_non_corp   = ent and ent != "c_corp"
+    is_domestic   = international == "no"
+    is_non_rd     = ind and not any(k in ind for k in _RD_API_INDUSTRIES)
+    is_non_sub_rev = ind and not any(k in ind for k in _SUB_API_INDUSTRIES)
+
+    filtered = []
+    for req in requirements:
+        low = req.lower()
+        if is_domestic   and any(k in low for k in _INTL_KEYWORDS):
+            continue
+        if is_non_corp   and any(k in low for k in _CORP_KEYWORDS):
+            continue
+        if is_non_rd     and any(k in low for k in _RD_KEYWORDS):
+            continue
+        if not multi_state and any(k in low for k in _STATE_KEYWORDS):
+            continue
+        filtered.append(req)
+    return filtered
+
+
 def _build_compliance_prompt(
     company_name: str,
     stage_key: str,
@@ -880,8 +924,15 @@ def _build_compliance_prompt(
     if entity_type and entity_type in entity_notes:
         lines.append(f"ENTITY NOTE: {entity_notes[entity_type]}")
 
+    filtered_reqs = _filter_requirements(
+        requirements,
+        entity_type=entity_type,
+        industry=industry,
+        international=international_presence,
+        multi_state=bool(operating_states and len(operating_states) > 1),
+    )
     lines += ["", f"CRITICAL COMPLIANCE AREAS FOR {stage_name.upper()}:"]
-    for req in requirements:
+    for req in filtered_reqs:
         lines.append(f"  • {req}")
 
     lines += ["", "DOCUMENTS PROVIDED:"]

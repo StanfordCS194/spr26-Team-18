@@ -121,6 +121,34 @@ def scan(
             ),
         ),
     ] = None,
+    entity_type: Annotated[
+        str | None,
+        typer.Option(
+            "--entity-type",
+            help="Legal entity type: c_corp, s_corp, llc, other. Skips inapplicable rules (e.g. ISOs/QSBS for non-C-Corps).",
+        ),
+    ] = None,
+    industry: Annotated[
+        str | None,
+        typer.Option(
+            "--industry",
+            help="Primary industry: saas, fintech, hardware, biotech, ecommerce, other. Skips irrelevant rules (e.g. R&D rules for non-tech).",
+        ),
+    ] = None,
+    international: Annotated[
+        bool | None,
+        typer.Option(
+            "--international/--no-international",
+            help="Whether the company has foreign operations or bank accounts. Skips FBAR/GILTI/§482 rules when --no-international.",
+        ),
+    ] = None,
+    multi_state: Annotated[
+        bool | None,
+        typer.Option(
+            "--multi-state/--no-multi-state",
+            help="Whether the company has employees in more than one state. Enables state income tax nexus checks when --multi-state.",
+        ),
+    ] = None,
 ) -> None:
     """Scan a repository using static parsing only."""
     console = Console()
@@ -160,6 +188,10 @@ def scan(
             license_source_repo=license_source_repo,
             vuln_osv=vuln_osv,
             funding_round=funding_round,
+            entity_type=entity_type,
+            industry=industry,
+            international=international,
+            multi_state=multi_state,
         )
     engine = ScanEngine(
         ingestor=ingestor,

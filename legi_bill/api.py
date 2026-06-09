@@ -2,7 +2,7 @@ import json as _json
 import sys
 from io import BytesIO, StringIO
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
@@ -745,6 +745,207 @@ def startup_custom_grade(req: StartupCustomGradeRequest):
         raise HTTPException(502, f"Custom grading failed: {e}")
 
     return {"results": cleaned, "model": resp.model, "provider": resp.provider}
+
+
+_COMPLIANCE_STAGE_REQUIREMENTS: dict[str, list[str]] = {
+    "pre_seed": [
+        "IRC §83(b) election — founders must file within 30 days of receiving restricted stock",
+        "Form 1099-NEC — required for any contractor paid $600+ in the calendar year",
+        "EIN (Form SS-4) — confirm employer identification number is established",
+        "IRC §1202 QSBS — verify aggregate gross assets ≤ $50M at each stock issuance",
+        "SAFE / convertible note — ASC 480/815 debt vs. equity classification; OID accrual under IRC §1273",
+        "EFTPS deposit schedule — enroll and confirm monthly vs. semiweekly depositor classification",
+    ],
+    "seed": [
+        "IRC §409A — option grants must be at FMV per an independent §409A valuation",
+        "IRC §1202 QSBS eligibility tracking per share lot",
+        "IRC §83(b) elections for any unvested restricted stock grants in the prior 30 days",
+        "Form 1099-NEC for contractor payments ≥ $600; collect W-9 before first payment",
+        "FICA / federal and state payroll withholding; Form 941 quarterly deposits via EFTPS",
+        "IRC §174 — R&D expenditures must be capitalized and amortized (5-yr domestic / 15-yr foreign) — no immediate expensing on tax return",
+        "State income tax nexus — each state where an employee is based requires a corporate return and payroll registration",
+        "SAFE / convertible note — ASC 480/815 classification; bifurcation of embedded features; OID accrual",
+    ],
+    "series_a": [
+        "IRC §409A — every option grant requires a current independent appraisal (refresh ≥ annually)",
+        "IRC §422(d) — ISO annual $100,000 FMV limit per employee; excess auto-converts to NSO",
+        "Form 3921 — file for each ISO exercise by January 31; disclose AMT exposure to employees",
+        "Form 3922 — file for each ESPP stock transfer by January 31",
+        "IRC §409A on severance and deferred bonus arrangements (short-term deferral exception or compliant schedule)",
+        "Form 941 quarterly payroll tax deposits via EFTPS; verify depositor schedule (monthly vs. semiweekly)",
+        "Form 1099-NEC for all contractors ≥ $600",
+        "IRC §174 amortization — 5-year domestic / 15-year foreign; track deferred tax liability vs. ASC 730",
+        "State income tax nexus — corporate returns and payroll registrations for all states with remote employees",
+    ],
+    "series_b": [
+        "All Series A requirements, plus:",
+        "Post-Wayfair sales tax nexus — economic nexus thresholds (~$100K revenue or 200 transactions) in 45 states + DC",
+        "FBAR (FinCEN 114) — due April 15 if aggregate foreign account balance ever exceeded $10,000",
+        "IRC §382 ownership-change study after each equity round — limits annual NOL utilization permanently",
+        "IRC §41 R&D Tax Credit — contemporaneous QRE documentation; §174 mandatory 5-year amortization (post-2022)",
+        "IRC §280G — §4999 excise tax analysis on change-of-control acceleration payments",
+        "IRC §482 transfer pricing — arm's-length pricing and contemporaneous documentation for all related-party transactions",
+        "GILTI (IRC §951A) — include foreign subsidiary income annually; Form 5471 per CFC",
+        "State income tax nexus — apportionment formula analysis as employee headcount grows across states",
+        "EFTPS deposit schedule — reassess semiweekly vs. monthly classification after each hiring wave",
+    ],
+    "series_c_plus": [
+        "All Series B requirements, plus:",
+        "IRC §162(m) — $1M tax deduction cap on 'covered employee' compensation (permanent post-TCJA; no performance exception)",
+        "ASC 606 / IRC §451 revenue recognition — five-step model compliance; deferred revenue schedule",
+        "IRC §163(j) — business interest expense limited to 30% of ATI (EBIT basis post-2021)",
+        "SOX §302 / §404 — internal control readiness if pre-IPO or recently public",
+        "IRC §280G pre-IPO planning for all change-of-control and acceleration provisions",
+        "IRC §174 — multi-year amortization schedules and deferred tax provision for accumulated R&D spend",
+    ],
+}
+
+_STAGE_DISPLAY_NAMES: dict[str, str] = {
+    "pre_seed": "Pre-seed",
+    "seed": "Seed",
+    "series_a": "Series A",
+    "series_b": "Series B",
+    "series_c_plus": "Series C+",
+}
+
+_STAGE_ALIASES_API: dict[str, str] = {
+    "pre-seed": "pre_seed", "preseed": "pre_seed", "pre_seed": "pre_seed",
+    "seed": "seed",
+    "series-a": "series_a", "series_a": "series_a", "a": "series_a",
+    "series-b": "series_b", "series_b": "series_b", "b": "series_b",
+    "series-c": "series_c_plus", "series_c": "series_c_plus",
+    "series-c+": "series_c_plus", "series_c_plus": "series_c_plus",
+    "c": "series_c_plus", "c+": "series_c_plus",
+    "growth": "series_c_plus", "pre-ipo": "series_c_plus", "pre_ipo": "series_c_plus",
+}
+
+_STAGE_ORDER = ["pre_seed", "seed", "series_a", "series_b", "series_c_plus"]
+
+_COMPLIANCE_SYSTEM = (
+    "You are an expert IRS and startup financial compliance analyst. "
+    "You will be given one or more financial documents (with their type labels) "
+    "uploaded by a startup founder, along with their funding stage. "
+    "Analyze the documents for IRS and tax compliance risks specific to their stage. "
+    "Focus only on what the documents show or are missing — do not invent facts. "
+    "If a document type is present but the content is insufficient to evaluate a "
+    "compliance area, say so explicitly in the finding. "
+    "Return ONLY valid JSON with this exact schema:\n"
+    '{"overall_risk": "Low|Moderate|High|Unknown", "risk_score": 0-100, '
+    '"summary": "1-2 sentence summary", '
+    '"issues": [{"area": "string", "irc_section": "§xxx or N/A", '
+    '"finding": "what the document shows or is missing", '
+    '"recommendation": "specific next step", "severity": "high|medium|low"}], '
+    '"notes": ["string"]}\n'
+    "No prose outside the JSON. No markdown fences."
+)
+
+
+def _build_compliance_prompt(
+    company_name: str,
+    stage_key: str,
+    documents: list[dict],  # [{"type": label, "text": str}]
+) -> str:
+    stage_name = _STAGE_DISPLAY_NAMES.get(stage_key, stage_key)
+    requirements = _COMPLIANCE_STAGE_REQUIREMENTS.get(stage_key, [])
+
+    lines = [
+        f"COMPANY: {company_name}",
+        f"FUNDING STAGE: {stage_name}",
+        "",
+        f"CRITICAL COMPLIANCE AREAS FOR {stage_name.upper()}:",
+    ]
+    for req in requirements:
+        lines.append(f"  • {req}")
+
+    lines += ["", "DOCUMENTS PROVIDED:"]
+    for i, doc in enumerate(documents, 1):
+        doc_type = doc.get("type") or "Unspecified document"
+        text = doc.get("text", "").strip()
+        if len(text) > 6000:
+            text = text[:6000] + "\n[TRUNCATED]"
+        lines += [f"\n--- Document {i}: {doc_type} ---", text or "(empty)"]
+
+    lines += [
+        "",
+        "Evaluate each compliance area listed above against the documents provided. "
+        "Flag any area where documentation is missing, incomplete, or shows a potential "
+        "IRS/tax risk. Assign overall_risk and risk_score based on the number and severity "
+        "of issues found.",
+    ]
+    return "\n".join(lines)
+
+
+@app.post("/api/compliance/audit")
+async def compliance_audit(
+    company_name: Optional[str] = Form(None),
+    funding_round: Optional[str] = Form(None),
+    document_text: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    files: List[UploadFile] = File(default=[]),
+    document_types: Optional[str] = Form(None),
+    llm_provider: Optional[str] = Form(None),
+    llm_model: Optional[str] = Form(None),
+):
+    """Stage-aware IRS/tax compliance audit of uploaded financial documents.
+
+    Accepts one or more documents with optional document-type labels and a
+    funding round, then uses an LLM to surface stage-specific compliance gaps.
+    Backward-compatible with the single-file + document_text legacy interface.
+    """
+    stage_key = _STAGE_ALIASES_API.get((funding_round or "seed").strip().lower(), "seed")
+    name = (company_name or "").strip() or "(unspecified)"
+
+    doc_type_labels: list[str] = []
+    if document_types:
+        try:
+            parsed = _json.loads(document_types)
+            if isinstance(parsed, list):
+                doc_type_labels = [str(t) for t in parsed]
+        except (ValueError, TypeError):
+            pass
+
+    # Collect all document texts with type labels.
+    documents: list[dict] = []
+
+    all_files = [f for f in ([file] + list(files)) if f is not None and f.filename]
+    for i, uf in enumerate(all_files):
+        try:
+            text = _extract_text(uf)
+        except Exception as exc:
+            raise HTTPException(400, f"Could not read '{uf.filename}': {exc}") from exc
+        label = doc_type_labels[i] if i < len(doc_type_labels) else uf.filename
+        documents.append({"type": label, "text": text})
+
+    if document_text and document_text.strip():
+        documents.append({"type": "Pasted text", "text": document_text.strip()})
+
+    if not documents:
+        raise HTTPException(400, "Provide at least one file or document_text.")
+
+    prompt = _build_compliance_prompt(name, stage_key, documents)
+    try:
+        client = _get_llm_client(provider=llm_provider, model=llm_model)
+        resp = client.complete(
+            messages=[
+                {"role": "system", "content": _COMPLIANCE_SYSTEM},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+            response_format={"type": "json_object"},
+        )
+        result = _json.loads(resp.content or "{}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Compliance audit failed: {exc}") from exc
+
+    result.setdefault("overall_risk", "Unknown")
+    result.setdefault("risk_score", None)
+    result.setdefault("summary", "No summary returned.")
+    result.setdefault("issues", [])
+    result.setdefault("notes", [])
+    result["stage"] = _STAGE_DISPLAY_NAMES.get(stage_key, stage_key)
+    return result
 
 
 @app.get("/api/bills/{bill_number}")

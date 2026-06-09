@@ -110,6 +110,17 @@ def scan(
         bool,
         typer.Option("--vuln-osv", help="Query the OSV vulnerability database for known CVEs in pinned dependencies."),
     ] = False,
+    funding_round: Annotated[
+        str | None,
+        typer.Option(
+            "--funding-round",
+            help=(
+                "Funding stage for IRS/tax compliance rules. Accepted values: "
+                "pre-seed, seed, series-a, series-b, series-c (or c+), growth, pre-ipo. "
+                "Defaults to seed when omitted."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Scan a repository using static parsing only."""
     console = Console()
@@ -148,6 +159,7 @@ def scan(
             license_artifact_inspection=license_artifact_inspection,
             license_source_repo=license_source_repo,
             vuln_osv=vuln_osv,
+            funding_round=funding_round,
         )
     engine = ScanEngine(
         ingestor=ingestor,

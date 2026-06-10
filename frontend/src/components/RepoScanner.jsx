@@ -98,17 +98,6 @@ function ownerRepo(url) {
   return m ? m[1] : url;
 }
 
-function shouldUsePlaceholderResults(err) {
-  const message = String(err?.message || "");
-  return (
-    message.includes("Failed to fetch") ||
-    message.includes("404") ||
-    message.includes("502") ||
-    message.includes("ECONNREFUSED") ||
-    message.toLowerCase().includes("proxy")
-  );
-}
-
 // Normalise evidence from the backend (location.path / location.line_start)
 // or from old-style placeholder objects (file / line).
 function evidenceLocation(ev) {
@@ -172,7 +161,7 @@ function FindingCard({ finding }) {
         <div className="px-5 pb-4 space-y-3 border-t border-border/40 pt-3">
           {finding.evidence && finding.evidence.length > 0 && (
             <div>
-              <div className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">Evidence</div>
+              <div className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">Repo evidence</div>
               <div className="space-y-1.5">
                 {finding.evidence.map((ev, i) => {
                   const loc = evidenceLocation(ev);
@@ -189,6 +178,37 @@ function FindingCard({ finding }) {
                       {ev.description && (
                         <div className="text-text-secondary text-[11px]">{ev.description}</div>
                       )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {finding.legal_context && finding.legal_context.length > 0 && (
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">Legal context</div>
+              <div className="space-y-1.5">
+                {finding.legal_context.map((ctx, i) => {
+                  const citation = ctx.citations?.[0];
+                  return (
+                    <div key={ctx.rule_id || i} className="rounded-lg border border-accent-gold/30 bg-accent-gold/10 px-3 py-2 text-[12px]">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-semibold text-text-primary">{ctx.confidence || "low"} confidence</span>
+                        {ctx.source_interpretation && (
+                          <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-text-muted">
+                            interpretation
+                          </span>
+                        )}
+                        {citation?.url ? (
+                          <a href={citation.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent-gold hover:underline">
+                            {citation.citation || citation.title}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : citation ? (
+                          <span className="text-text-muted">{citation.citation || citation.title}</span>
+                        ) : null}
+                      </div>
+                      <p className="mt-1 text-text-secondary leading-relaxed">{ctx.why_it_matters || ctx.legal_basis}</p>
                     </div>
                   );
                 })}
@@ -460,7 +480,7 @@ function ResultsView({ results, repoUrl, industry, onboardingProfile, onReset, o
 function WorkspaceReady({ profile, onNavigate }) {
   const links = [
     { id: "benchmark", label: "Benchmark", body: "Compare scanner signals against advisory-style examples." },
-    { id: "startup", label: "Startup Health", body: "Grade legal, financial, product, and custom AI readiness." },
+    { id: "legal", label: "Legal Insights", body: "Review source-backed legal context and automatic savings." },
     { id: "recs", label: "Recommendations", body: "Track the highest-leverage fixes from your workspace." },
   ];
   return (
@@ -613,20 +633,8 @@ export default function RepoScanner({
       });
       setStep("results");
     } catch (err) {
-      // If the backend isn't ready yet, show a friendly placeholder result
-      if (shouldUsePlaceholderResults(err)) {
-        setResults(PLACEHOLDER_RESULTS);
-        onScanComplete?.({
-          results: PLACEHOLDER_RESULTS,
-          repoUrl: scanUrl.trim(),
-          industry: scanIndustry,
-          productName: scanProductName || "",
-        });
-        setStep("results");
-      } else {
-        setApiError(err.message);
-        setStep("form");
-      }
+      setApiError(err.message);
+      setStep("form");
     }
   }
 
@@ -815,56 +823,3 @@ export default function RepoScanner({
     />
   );
 }
-
-// ── Placeholder results (shown when backend isn't connected yet) ──────────────
-
-const PLACEHOLDER_RESULTS = {
-  placeholder: true,
-  findings: [
-    {
-      id: "ph-1",
-      title: "GPL-3.0 dependency detected",
-      description: "One or more runtime dependencies use the GPL-3.0 license. If your product is distributed (not just SaaS), this may require review of your distribution obligations.",
-      severity: "high",
-      confidence: "high",
-      evidence: [
-        { file: "package.json", line: 14, excerpt: '"some-gpl-lib": "^2.1.0"' },
-      ],
-      recommendation: "Review whether this dependency is required at runtime. Consider alternatives with permissive licenses (MIT, Apache-2.0). Consult counsel if distributing binaries.",
-    },
-    {
-      id: "ph-2",
-      title: "Analytics SDK imported without visible consent gate",
-      description: "An analytics library (e.g. Segment, PostHog) is imported and called before user consent is collected. This may create a GDPR/CCPA trigger.",
-      severity: "medium",
-      confidence: "medium",
-      evidence: [
-        { file: "src/analytics.ts", line: 3, excerpt: "import Analytics from '@segment/analytics-next'" },
-        { file: "src/main.tsx", line: 11, excerpt: "analytics.track('page_view', { userId })" },
-      ],
-      recommendation: "Wrap analytics initialization and track calls behind a consent check. Ensure opt-out is accessible and persisted.",
-    },
-    {
-      id: "ph-3",
-      title: "No SECURITY.md found",
-      description: "The repository does not contain a SECURITY.md file. This is expected by GitHub's security advisory system and by enterprise buyers during diligence.",
-      severity: "low",
-      confidence: "high",
-      evidence: [],
-      recommendation: "Add a SECURITY.md to the repo root describing your vulnerability disclosure policy and contact method.",
-    },
-    {
-      id: "ph-4",
-      title: "Lockfile missing for declared dependencies",
-      description: "A package.json was found but no package-lock.json, yarn.lock, or pnpm-lock.yaml is committed. Without a lockfile, dependency versions are not pinned and supply chain integrity cannot be verified.",
-      severity: "medium",
-      confidence: "high",
-      evidence: [
-        { file: "package.json", excerpt: "Found, but no lockfile committed alongside it" },
-      ],
-      recommendation: "Commit your lockfile (package-lock.json or yarn.lock) and add CI checks to keep it up to date.",
-    },
-  ],
-  disclaimer:
-    "This is a placeholder result — the scanner backend is not yet connected. Findings shown are illustrative examples of what the scanner will produce. No conclusions about this specific repository should be drawn from this output.",
-};

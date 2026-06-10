@@ -4,6 +4,7 @@ import json
 
 from typer.testing import CliRunner
 
+import startup_risk.cli as cli_module
 from startup_risk.cli import app
 
 
@@ -57,3 +58,106 @@ def test_cli_license_only_excludes_static_hygiene_findings(tmp_path):
     payload = json.loads(result.stdout)
     assert payload["findings"]
     assert {finding["scanner_id"] for finding in payload["findings"]} == {"license_risk"}
+
+
+def test_cli_legal_ingest_writes_normalized_authorities(tmp_path):
+    input_path = tmp_path / "authorities.jsonl"
+    store_dir = tmp_path / "legal-store"
+    input_path.write_text(
+        json.dumps(
+            {
+                "source_id": "ca-privacy-guidance",
+                "title": "Example Privacy Guidance",
+                "type": "agency guidance",
+                "jurisdiction": "CA",
+                "topic": "privacy",
+                "citation": "Example Guidance § 1",
+                "text": "Businesses should provide notice before collecting personal information.",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["legal-ingest", str(input_path), "--store-dir", str(store_dir)],
+    )
+
+    assert result.exit_code == 0
+    rows = [
+        json.loads(line)
+        for line in (store_dir / "authorities.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows[0]["source_id"] == "ca-privacy-guidance"
+    assert rows[0]["authority_type"] == "agency_guidance"
+
+
+def test_cli_legal_fetch_writes_public_api_results(tmp_path, monkeypatch):
+    store_dir = tmp_path / "legal-store"
+
+    def fake_fetch_public_legal_authorities(*, source, query, limit, topic, jurisdiction):
+        return [
+            cli_module.normalize_authority(
+                {
+                    "source_id": f"{source}-privacy",
+                    "title": "Fetched Privacy Source",
+                    "type": "agency guidance",
+                    "jurisdiction": jurisdiction,
+                    "topic": topic,
+                    "citation": "Fetched Citation",
+                    "text": f"Fetched {query} source.",
+                }
+            )
+        ]
+
+    monkeypatch.setattr(cli_module, "fetch_public_legal_authorities", fake_fetch_public_legal_authorities)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "legal-fetch",
+            "privacy",
+            "--source",
+            "federal_register",
+            "--store-dir",
+            str(store_dir),
+            "--topic",
+            "privacy",
+            "--limit",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    rows = [
+        json.loads(line)
+        for line in (store_dir / "authorities.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows[0]["source_id"] == "federal_register-privacy"
+    assert rows[0]["topic"] == "privacy"
+
+
+def test_cli_legal_source_setup_saves_explicit_presets(tmp_path):
+    store_dir = tmp_path / "legal-store"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "legal-source-setup",
+            "--store-dir",
+            str(store_dir),
+            "--industry",
+            "fintech",
+        ],
+    )
+
+    assert result.exit_code == 0
+    rows = [
+        json.loads(line)
+        for line in (store_dir / "source_queries.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    sources = {row["source"] for row in rows}
+    assert "cfpb" in sources
+    assert "bulk_sync" in sources
+    assert any(row["query"] == "ecfr_financial_title_12" for row in rows)

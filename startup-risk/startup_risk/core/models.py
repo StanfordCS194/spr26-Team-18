@@ -142,6 +142,23 @@ class FindingEvidence(BaseModel):
     excerpt: str | None = None
 
 
+class LegalCitation(BaseModel):
+    title: str
+    citation: str | None = None
+    url: str | None = None
+    authority_type: str = "other"
+    jurisdiction: str | None = None
+
+
+class LegalFindingContext(BaseModel):
+    rule_id: str
+    legal_basis: str
+    why_it_matters: str
+    citations: list[LegalCitation] = Field(default_factory=list)
+    confidence: Confidence = "low"
+    source_interpretation: bool = True
+
+
 class Finding(BaseModel):
     id: str
     title: str
@@ -150,6 +167,7 @@ class Finding(BaseModel):
     severity: Severity
     confidence: Confidence
     evidence: list[FindingEvidence] = Field(default_factory=list)
+    legal_context: list[LegalFindingContext] = Field(default_factory=list)
     recommendation: str
     scanner_id: str
     scanner_version: str

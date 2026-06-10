@@ -7,6 +7,8 @@ from startup_risk.core.models import (
     FileSnapshot,
     Finding,
     FindingEvidence,
+    LegalCitation,
+    LegalFindingContext,
     RepositoryInventory,
     RepositorySnapshot,
     RepositorySource,
@@ -126,3 +128,44 @@ def test_summary_counts_only_findings_in_severity_counts():
         "high": 0,
         "critical": 0,
     }
+
+
+def test_json_output_includes_legal_context():
+    result = ScanResult.from_findings(
+        source=RepositorySource(kind="local", location="fixture"),
+        inventory=RepositoryInventory(),
+        findings=[
+            Finding(
+                id="legal.test",
+                title="Legal context test",
+                description="A finding with legal context.",
+                category="privacy",
+                severity="medium",
+                confidence="medium",
+                evidence=[],
+                legal_context=[
+                    LegalFindingContext(
+                        rule_id="legal_guidance.test",
+                        legal_basis="Notice is required before collecting consumer data.",
+                        why_it_matters="Missing notice can create regulatory risk.",
+                        citations=[
+                            LegalCitation(
+                                title="Example Privacy Guidance",
+                                citation="Example Guidance § 1",
+                                authority_type="agency_guidance",
+                                jurisdiction="CA",
+                            )
+                        ],
+                        confidence="high",
+                    )
+                ],
+                recommendation="Publish a privacy notice.",
+                scanner_id="test",
+                scanner_version="1.0.0",
+            )
+        ],
+    )
+
+    payload = json.loads(result_to_json(result))
+
+    assert payload["findings"][0]["legal_context"][0]["citations"][0]["citation"] == "Example Guidance § 1"

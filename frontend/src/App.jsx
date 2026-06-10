@@ -11,7 +11,7 @@ import ActiveRecommendations from "./components/ActiveRecommendations";
 import LegalIntelligence from "./components/LegalIntelligence";
 import FinancialCompliance from "./components/FinancialCompliance";
 
-const TAB_IDS = ["home", "scanner", "issues", "benchmark", "startup", "legal", "recs", "financial"];
+const TAB_IDS = ["home", "scanner", "issues", "benchmark", "legal", "recs", "financial"];
 const SESSION_KEY = "legiBill.demoSession.v1";
 
 function tabFromHash() {
@@ -158,11 +158,14 @@ export default function App() {
             {activeTab === "startup" && (
               <StartupGrader onRecommendationsUpdated={setStartupRecommendations} />
             )}
-            {activeTab === "legal" && <LegalIntelligence />}
+            {activeTab === "legal" && <LegalIntelligence profile={session.profile} />}
             {activeTab === "recs" && (
               <ActiveRecommendations
                 snapshot={startupRecommendations}
-                onGoToStartup={() => changeTab("startup")}
+                latestRepoScan={latestRepoScan}
+                onOpenScanner={() => changeTab("scanner")}
+                onOpenIssues={() => changeTab("issues")}
+                onOpenLegal={() => changeTab("legal")}
               />
             )}
             {activeTab === "financial" && <FinancialCompliance />}

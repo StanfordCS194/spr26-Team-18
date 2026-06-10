@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -13,8 +14,8 @@ import {
   Rocket,
   Scale,
   ShieldAlert,
-  Sparkles,
   Users,
+  RefreshCw,
 } from "lucide-react";
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"];
@@ -161,6 +162,20 @@ export default function HomePage({
     : Array.isArray(recommendations)
       ? recommendations.length
       : 0;
+  const [legalStatus, setLegalStatus] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/legal-intelligence/status")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (alive) setLegalStatus(data);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   return (
     <div className="space-y-6 pb-4">
@@ -174,7 +189,7 @@ export default function HomePage({
             {companyName} dashboard
           </h1>
           <p className="mt-1 max-w-[680px] text-[14px] leading-relaxed text-text-secondary">
-            Track repository risk, startup health, legal exposure, and action items from one working view.
+            Track repository risk, legal exposure, financial readiness, and action items from one working view.
           </p>
         </div>
         <div className="flex gap-2">
@@ -276,6 +291,33 @@ export default function HomePage({
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+          <button
+            onClick={() => onTabChange("legal")}
+            className="mb-4 flex w-full items-center justify-between gap-4 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-left transition-all hover:border-orange-300"
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white">
+                <Database className="h-5 w-5 text-orange-600" strokeWidth={2.2} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold text-text-primary">Legal guidance freshness</div>
+                <div className="mt-0.5 text-[12px] text-text-secondary">
+                  {legalStatus?.last_checked
+                    ? `Last refreshed ${new Date(legalStatus.last_checked).toLocaleString()}`
+                    : `${legalStatus?.source_count ?? 0} configured sources; no refresh has run yet`}
+                </div>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-3">
+              <div className="text-right">
+                <div className="text-[20px] font-bold tabular-nums text-orange-600">
+                  {legalStatus?.enabled_rule_count ?? 0}
+                </div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">rules</div>
+              </div>
+              <RefreshCw className="h-4 w-4 text-text-muted" strokeWidth={2.3} />
+            </div>
+          </button>
           <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">Work queue</div>
           <div className="mt-4 space-y-2">
             <WorkItem
@@ -286,10 +328,10 @@ export default function HomePage({
               onClick={() => onTabChange(hasScan ? "issues" : "scanner")}
             />
             <WorkItem
-              title="Grade startup health"
-              body="Score legal, financial, product, engineering, and compliance readiness."
-              action="Grade"
-              onClick={() => onTabChange("startup")}
+              title="Review legal intelligence"
+              body="Open source-backed legal context and automatic legal savings."
+              action="Open"
+              onClick={() => onTabChange("legal")}
             />
             <WorkItem
               title="Compare benchmarks"
@@ -321,13 +363,6 @@ export default function HomePage({
           title="Benchmark"
           body="Compare findings to sample advisory patterns and industry scenarios."
           Icon={FlaskConical}
-          onTabChange={onTabChange}
-        />
-        <NavCard
-          id="startup"
-          title="Startup Health"
-          body="Generate a multi-axis readiness grade from business and technical inputs."
-          Icon={Sparkles}
           onTabChange={onTabChange}
         />
         <NavCard

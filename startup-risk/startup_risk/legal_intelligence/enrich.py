@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+from startup_risk.core.models import Finding, LegalFindingContext
+from startup_risk.legal_intelligence.models import LegalGuidanceRule
+
+
+_CATEGORY_ALIASES: dict[str, set[str]] = {
+    "privacy": {"privacy", "analytics_privacy", "pii_data_flow", "code_compliance"},
+    "financial_compliance": {"financial_compliance"},
+    "employment_payroll": {"financial_compliance", "legal"},
+    "security_controls": {
+        "secrets",
+        "secret",
+        "auth_access_control",
+        "infra_misconfig",
+        "cicd_security",
+        "rate_limit",
+        "error_disclosure",
+        "code_compliance",
+    },
+    "licensing": {"license", "license_risk", "legal"},
+    "consumer_protection": {"legal", "code_compliance", "analytics_privacy"},
+    "healthcare": {"privacy", "pii_data_flow", "code_compliance"},
+    "ai_data_governance": {"privacy", "pii_data_flow", "code_compliance", "custom_compliance"},
+    "legal": {"legal", "legal_docs"},
+    "compliance": {"code_compliance", "custom_compliance", "legal", "financial_compliance"},
+}
+
+
+class LegalGuidanceIndex:
+    """In-memory matcher from scanner findings to distilled legal guidance."""
+
+    def __init__(self, rules: list[LegalGuidanceRule], *, profile: dict | None = None) -> None:
+        profile_tags = _profile_tags(profile)
+        self.rules = [
+            rule
+            for rule in rules
+            if rule.enabled
+            and rule.review_status != "rejected"
+            and _rule_matches_profile(rule, profile_tags)
+        ]
+
+    def match_finding(self, finding: Finding, *, limit: int = 3) -> list[LegalFindingContext]:
+        scored: list[tuple[int, LegalGuidanceRule]] = []
+        haystack = _finding_text(finding)
+        for rule in self.rules:
+            score = _category_score(rule, finding)
+            score += _keyword_score(rule, haystack)
+            if score > 0:
+                scored.append((score, rule))
+
+        contexts: list[LegalFindingContext] = []
+        for _, rule in sorted(scored, key=lambda item: (-item[0], item[1].id))[:limit]:
+            contexts.append(
+                LegalFindingContext(
+                    rule_id=rule.id,
+                    legal_basis=rule.legal_basis,
+                    why_it_matters=rule.finding_rationale,
+                    citations=rule.citations,
+                    confidence=rule.confidence,
+                    source_interpretation=rule.source_interpretation,
+                )
+            )
+        return contexts
+
+
+def enrich_findings(findings: list[Finding], index: LegalGuidanceIndex) -> list[Finding]:
+    """Attach legal context to findings while preserving scanner evidence."""
+
+    enriched: list[Finding] = []
+    for finding in findings:
+        contexts = index.match_finding(finding)
+        if contexts:
+            finding = finding.model_copy(update={"legal_context": contexts})
+        enriched.append(finding)
+    return enriched
+
+
+def _category_score(rule: LegalGuidanceRule, finding: Finding) -> int:
+    aliases = _CATEGORY_ALIASES.get(rule.category, {rule.category})
+    finding_values = {finding.category.lower(), finding.scanner_id.lower()}
+    return 8 if aliases & finding_values else 0
+
+
+def _keyword_score(rule: LegalGuidanceRule, haystack: str) -> int:
+    terms = [rule.title, rule.risk_signal, rule.legal_basis, *rule.detection_hints]
+    score = 0
+    for term in terms:
+        for token in _tokens(term):
+            if token in haystack:
+                score += 1
+    return min(score, 8)
+
+
+def _finding_text(finding: Finding) -> str:
+    parts = [
+        finding.title,
+        finding.description,
+        finding.category,
+        finding.recommendation,
+        finding.scanner_id,
+    ]
+    for evidence in finding.evidence:
+        parts.append(evidence.description)
+        if evidence.excerpt:
+            parts.append(evidence.excerpt)
+    return " ".join(parts).lower()
+
+
+def _tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in "".join(char.lower() if char.isalnum() else " " for char in text).split()
+        if len(token) >= 5
+    }
+
+
+def _profile_tags(profile: dict | None) -> set[str]:
+    if not profile:
+        return set()
+    values = [
+        profile.get("industry"),
+        profile.get("industryProductType"),
+        profile.get("productType"),
+        profile.get("customerType"),
+        profile.get("goToMarket"),
+    ]
+    return {
+        token
+        for value in values
+        for token in _tokens(str(value or ""))
+    }
+
+
+def _rule_matches_profile(rule: LegalGuidanceRule, profile_tags: set[str]) -> bool:
+    if not profile_tags or not rule.industry_tags:
+        return True
+    rule_tags = {tag.lower() for tag in rule.industry_tags}
+    return bool(rule_tags & profile_tags)

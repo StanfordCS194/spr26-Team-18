@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Landmark,
   MessageCircle,
+  Scale,
   ShieldAlert,
   FlaskConical,
   LogOut,
@@ -15,6 +16,7 @@ const TABS = [
   { id: "scanner",   label: "Repo Scanner",    Icon: ShieldAlert },
   { id: "issues",    label: "Issues",          Icon: Bug },
   { id: "benchmark", label: "Benchmark",       Icon: FlaskConical },
+  { id: "legal",     label: "Legal",           Icon: Scale },
   { id: "recs",      label: "Recommendations", Icon: MessageCircle },
   { id: "financial", label: "Financial",       Icon: Landmark },
 ];

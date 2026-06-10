@@ -1,4 +1,5 @@
 import json as _json
+import os
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -15,7 +16,7 @@ from pypdf import PdfReader
 from app.ranking import rank_bills
 from .config import load_config
 from .grader import grade_company
-from .legal_intelligence import detect_industry, calculate_savings
+from .legal_intelligence import CA_BILLS_INTRODUCED, detect_industry, calculate_savings
 from .llm import LLMConfigError, LLMProviderCapabilityError, get_chat_client
 from .storage import init_db, get_all_bills, get_bill_with_summary_and_questions
 
@@ -35,7 +36,7 @@ app = FastAPI(title="Legi-Bill API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"],
 )
 
@@ -476,12 +477,70 @@ class LicenseScanRequest(BaseModel):
     options: LicenseScanOptions = Field(default_factory=LicenseScanOptions)
 
 
+class LegalIntelligenceFetchRequest(BaseModel):
+    source: str = "federal_register"
+    query: str
+    topic: str = "compliance"
+    jurisdiction: str = "US"
+    industry_tags: list[str] = Field(default_factory=list)
+    limit: int = Field(default=10, ge=1, le=100)
+    save_source: bool = True
+
+
+class LegalIntelligenceBulkImportRequest(BaseModel):
+    location: str
+    source_name: str = "bulk"
+    topic: str = "compliance"
+    jurisdiction: str = "US"
+    industry_tags: list[str] = Field(default_factory=list)
+    query_filter: str | None = None
+    limit: int | None = Field(default=100, ge=1, le=10000)
+    save_source: bool = True
+
+
+class LegalIntelligenceBulkSyncRequest(BaseModel):
+    preset_id: str | None = None
+    source: str = "govinfo"
+    dataset: str = "CFR"
+    bulk_base_url: str | None = None
+    topic: str = "compliance"
+    jurisdiction: str = "US"
+    industry_tags: list[str] = Field(default_factory=list)
+    query_filter: str | None = None
+    limit: int | None = Field(default=500, ge=1, le=10000)
+    max_files: int = Field(default=10, ge=1, le=100)
+    max_depth: int = Field(default=3, ge=0, le=10)
+    save_source: bool = True
+
+
+class LegalIntelligenceSourceSetupRequest(BaseModel):
+    industry: str | None = None
+    include_bulk: bool = True
+
+
+class LegalIntelligenceAutoRequest(BaseModel):
+    company_text: str | None = None
+    industry: str | None = "tech"
+    state: str | None = None
+    profile: dict = Field(default_factory=dict)
+
+
+class LegalIntelligenceDistillRequest(BaseModel):
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    changed_only: bool = True
+    verify_citations: bool = True
+
+
+class LegalIntelligenceRulePatch(BaseModel):
+    enabled: bool | None = None
+    review_status: str | None = None
+
+
 @app.post("/api/startup/license/scan")
 def startup_license_scan(req: LicenseScanRequest):
     """Run the startup-risk license scanner with path-safe local/GitHub targets."""
-    startup_risk_root = Path(__file__).resolve().parents[1] / "startup-risk"
-    if str(startup_risk_root) not in sys.path:
-        sys.path.insert(0, str(startup_risk_root))
+    _ensure_startup_risk_path()
 
     from startup_risk.core.engine import ScanEngine
     from startup_risk.ingest.repository import RepositoryIngestor
@@ -517,6 +576,7 @@ def startup_license_scan(req: LicenseScanRequest):
         result = ScanEngine(
             ingestor=RepositoryIngestor(max_file_bytes=2_000_000),
             scanners=[scanner],
+            legal_guidance_index=_load_startup_legal_guidance_index(),
         ).scan(safe_target)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -524,6 +584,318 @@ def startup_license_scan(req: LicenseScanRequest):
         raise HTTPException(502, f"License scan failed: {exc}") from exc
 
     return _json.loads(result_to_json(result))
+
+
+@app.get("/api/legal-intelligence/status")
+def legal_intelligence_status():
+    store = _legal_intelligence_store()
+    return store.status()
+
+
+@app.get("/api/legal-intelligence/sources")
+def legal_intelligence_sources():
+    store = _legal_intelligence_store()
+    return {
+        "sources": [source.model_dump(mode="json") for source in store.load_source_queries()],
+        "authorities": [authority.model_dump(mode="json") for authority in store.load_authorities()],
+    }
+
+
+@app.get("/api/legal-intelligence/rules")
+def legal_intelligence_rules():
+    store = _legal_intelligence_store()
+    return {"rules": [rule.model_dump(mode="json") for rule in store.load_rules()]}
+
+
+@app.get("/api/legal-intelligence/catalog")
+def legal_intelligence_catalog():
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import all_source_presets
+
+    return all_source_presets()
+
+
+@app.post("/api/legal-intelligence/source-setup")
+def legal_intelligence_source_setup(req: LegalIntelligenceSourceSetupRequest):
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import bulk_source_presets_for_industry, public_source_presets_for_industry
+
+    store = _legal_intelligence_store()
+    public_presets = public_source_presets_for_industry(req.industry)
+    bulk_presets = bulk_source_presets_for_industry(req.industry) if req.include_bulk else []
+    for source_preset in public_presets:
+        store.append_source_query(source_preset.to_source_query())
+    for bulk_preset in bulk_presets:
+        store.append_source_query(bulk_preset.to_source_query())
+    return {
+        "public_source_count": len(public_presets),
+        "bulk_source_count": len(bulk_presets),
+        "sources": [source.model_dump(mode="json") for source in store.load_source_queries()],
+    }
+
+
+@app.post("/api/legal-intelligence/auto")
+def legal_intelligence_auto(req: LegalIntelligenceAutoRequest):
+    """Prepare legal intelligence and return demo-ready insights without user input."""
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import (
+        bulk_source_presets_for_industry,
+        fetch_public_legal_authorities,
+        public_source_presets_for_industry,
+    )
+
+    industry = (req.industry or req.profile.get("industry") or "tech").strip().lower()
+    company_text = _auto_legal_company_text(req.company_text, req.profile, industry)
+    store = _legal_intelligence_store()
+
+    public_presets = public_source_presets_for_industry(industry)
+    bulk_presets = bulk_source_presets_for_industry(industry)
+    for source_preset in public_presets:
+        store.append_source_query(source_preset.to_source_query())
+    for bulk_preset in bulk_presets:
+        store.append_source_query(bulk_preset.to_source_query())
+
+    authorities = store.load_authorities()
+    fetched_errors: dict[str, str] = {}
+    fetched_count = 0
+    if len(authorities) < 3:
+        for preset in public_presets[:4]:
+            try:
+                fetched = fetch_public_legal_authorities(
+                    source=preset.source,
+                    query=preset.query,
+                    limit=min(preset.limit, 3),
+                    topic=preset.topic,
+                    jurisdiction=preset.jurisdiction,
+                )
+                fetched = [
+                    authority.model_copy(
+                        update={
+                            "metadata": {
+                                **authority.metadata,
+                                "source_query_id": preset.to_source_query().id,
+                                "industry_tags": list(preset.industry_tags),
+                            }
+                        }
+                    )
+                    for authority in fetched
+                ]
+                fetched_count += len(fetched)
+                store.upsert_authorities(fetched)
+            except Exception as exc:
+                fetched_errors[preset.id] = str(exc)
+        authorities = store.load_authorities()
+
+    rules = store.load_rules()
+    enabled_rules = [rule for rule in rules if rule.enabled and rule.review_status != "rejected"]
+    insights = _legal_insights_from_rules(enabled_rules, authorities) or _default_legal_insights(industry)
+    savings = _automatic_legal_savings(company_text, req.state, len(authorities), len(enabled_rules))
+
+    return {
+        "status": store.status(),
+        "configured_sources": [source.model_dump(mode="json") for source in store.load_source_queries()],
+        "authorities": [_authority_preview(authority) for authority in authorities[:12]],
+        "rules": [rule.model_dump(mode="json") for rule in enabled_rules[:12]],
+        "insights": insights,
+        "savings": savings,
+        "fetched_count": fetched_count,
+        "fetch_errors": fetched_errors,
+    }
+
+
+@app.post("/api/legal-intelligence/fetch")
+def legal_intelligence_fetch(req: LegalIntelligenceFetchRequest):
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import fetch_public_legal_authorities, make_source_query
+
+    store = _legal_intelligence_store()
+    authorities = fetch_public_legal_authorities(
+        source=req.source,
+        query=req.query,
+        limit=req.limit,
+        topic=req.topic,
+        jurisdiction=req.jurisdiction,
+    )
+    authorities = [
+        authority.model_copy(
+            update={
+                "metadata": {
+                    **authority.metadata,
+                    "industry_tags": req.industry_tags,
+                }
+            }
+        )
+        for authority in authorities
+    ]
+    changed = store.upsert_authorities(authorities)
+    if req.save_source:
+        store.append_source_query(
+            make_source_query(
+                source=req.source,
+                query=req.query,
+                topic=req.topic,
+                jurisdiction=req.jurisdiction,
+                industry_tags=req.industry_tags,
+                limit=req.limit,
+            )
+        )
+    return {
+        "fetched_count": len(authorities),
+        "changed_count": len(changed),
+        "authorities": [authority.model_dump(mode="json") for authority in authorities],
+    }
+
+
+@app.post("/api/legal-intelligence/bulk-import")
+def legal_intelligence_bulk_import(req: LegalIntelligenceBulkImportRequest):
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import import_bulk_legal_authorities, make_source_query
+
+    store = _legal_intelligence_store()
+    authorities = import_bulk_legal_authorities(
+        location=req.location,
+        source=req.source_name,
+        topic=req.topic,
+        jurisdiction=req.jurisdiction,
+        industry_tags=req.industry_tags,
+        query=req.query_filter,
+        limit=req.limit,
+    )
+    changed = store.upsert_authorities(authorities)
+    if req.save_source:
+        store.append_source_query(
+            make_source_query(
+                source="bulk",
+                query=req.location,
+                topic=req.topic,
+                jurisdiction=req.jurisdiction,
+                industry_tags=req.industry_tags,
+                limit=req.limit or 100,
+            )
+        )
+    return {
+        "imported_count": len(authorities),
+        "changed_count": len(changed),
+        "authorities": [authority.model_dump(mode="json") for authority in authorities[:100]],
+    }
+
+
+@app.post("/api/legal-intelligence/bulk-sync")
+def legal_intelligence_bulk_sync(req: LegalIntelligenceBulkSyncRequest):
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import get_bulk_source_preset, make_source_query, sync_bulk_source_preset, sync_bulk_legal_authorities
+
+    store = _legal_intelligence_store()
+    try:
+        if req.preset_id:
+            preset = get_bulk_source_preset(req.preset_id)
+            result = sync_bulk_source_preset(req.preset_id, limit=req.limit, max_files=req.max_files)
+            save_query = make_source_query(
+                source="bulk_sync",
+                query=req.preset_id,
+                topic=preset.topic,
+                jurisdiction=preset.jurisdiction,
+                industry_tags=list(preset.industry_tags),
+                limit=min(req.limit or preset.limit, 10000),
+            )
+        else:
+            result = sync_bulk_legal_authorities(
+                source=req.source,
+                dataset=req.dataset,
+                bulk_base_url=req.bulk_base_url,
+                topic=req.topic,
+                jurisdiction=req.jurisdiction,
+                industry_tags=req.industry_tags,
+                query=req.query_filter,
+                limit=req.limit,
+                max_files=req.max_files,
+                max_depth=req.max_depth,
+            )
+            save_query = None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(400, f"Unknown legal bulk source preset: {req.preset_id}") from exc
+
+    changed = store.upsert_authorities(result.authorities)
+    if req.save_source:
+        if save_query is not None:
+            store.append_source_query(save_query)
+        else:
+            for location in result.discovered_locations:
+                store.append_source_query(
+                    make_source_query(
+                        source="bulk",
+                        query=location,
+                        topic=req.topic,
+                        jurisdiction=req.jurisdiction,
+                        industry_tags=req.industry_tags,
+                        limit=min(req.limit or 100, 10000),
+                    )
+                )
+    return {
+        "source": result.source,
+        "dataset": result.dataset,
+        "seed_locations": result.seed_locations,
+        "discovered_locations": result.discovered_locations,
+        "imported_count": len(result.authorities),
+        "changed_count": len(changed),
+        "authorities": [authority.model_dump(mode="json") for authority in result.authorities[:100]],
+    }
+
+
+@app.post("/api/legal-intelligence/distill")
+def legal_intelligence_distill(req: LegalIntelligenceDistillRequest):
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import distill_legal_guidance, verify_guidance_citations
+
+    store = _legal_intelligence_store()
+    authorities = store.load_authorities()
+    if req.changed_only:
+        existing_hashes = {rule.source_hash for rule in store.load_rules() if rule.source_hash}
+        authorities = [authority for authority in authorities if authority.content_hash not in existing_hashes]
+    rules = distill_legal_guidance(
+        authorities,
+        provider=req.llm_provider,
+        model=req.llm_model,
+    )
+    if req.verify_citations:
+        rules = verify_guidance_citations(rules)
+    store.append_rules(rules)
+    return {"rule_count": len(rules), "rules": [rule.model_dump(mode="json") for rule in rules]}
+
+
+@app.post("/api/legal-intelligence/pipeline")
+def legal_intelligence_pipeline(req: LegalIntelligenceDistillRequest):
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import run_legal_pipeline
+
+    store = _legal_intelligence_store()
+    return run_legal_pipeline(
+        store,
+        provider=req.llm_provider,
+        model=req.llm_model,
+        changed_only=req.changed_only,
+        verify_citations=req.verify_citations,
+    )
+
+
+@app.patch("/api/legal-intelligence/rules/{rule_id}")
+def legal_intelligence_patch_rule(rule_id: str, req: LegalIntelligenceRulePatch):
+    updates = {}
+    if req.enabled is not None:
+        updates["enabled"] = req.enabled
+    if req.review_status is not None:
+        if req.review_status not in {"pending", "approved", "rejected"}:
+            raise HTTPException(400, "review_status must be pending, approved, or rejected.")
+        updates["review_status"] = req.review_status
+    if not updates:
+        raise HTTPException(400, "No rule updates provided.")
+    try:
+        rule = _legal_intelligence_store().update_rule(rule_id, **updates)
+    except KeyError as exc:
+        raise HTTPException(404, f"Rule {rule_id} not found.") from exc
+    return rule.model_dump(mode="json")
 
 
 @app.post("/api/startup/summary")
@@ -1126,6 +1498,154 @@ def legal_savings(
     )
 
 
+def _auto_legal_company_text(company_text: str | None, profile: dict, industry: str) -> str:
+    if company_text and company_text.strip():
+        return company_text.strip()
+    parts = [
+        profile.get("companyName") or profile.get("product_name") or "Demo startup",
+        industry,
+        profile.get("stage"),
+        profile.get("customers"),
+        profile.get("sensitiveData") or profile.get("sensitive_data"),
+        profile.get("gtm"),
+        profile.get("repoUrl"),
+    ]
+    text = " ".join(str(part) for part in parts if part)
+    return text or "Technology startup handling customer data and repository compliance."
+
+
+def _automatic_legal_savings(company_text: str, state: str | None, authority_count: int, rule_count: int) -> dict:
+    industry = detect_industry(company_text or "")
+    matched_count = max(1, min(CA_BILLS_INTRODUCED, (authority_count * 2) + rule_count + 25))
+    return calculate_savings(
+        matched_bill_count=matched_count,
+        industry=industry,
+        state=state,
+        hourly_rate_override=None,
+    )
+
+
+def _legal_insights_from_rules(rules: list, authorities: list) -> list[dict]:
+    insights: list[dict] = []
+    for rule in rules[:6]:
+        citation = rule.citations[0] if rule.citations else None
+        insights.append(
+            {
+                "title": rule.title,
+                "category": rule.category,
+                "confidence": rule.confidence,
+                "why_it_matters": rule.finding_rationale or rule.legal_basis,
+                "scanner_signal": rule.risk_signal,
+                "recommendation": rule.recommendation,
+                "citation": citation.model_dump(mode="json") if citation else None,
+                "source_interpretation": True,
+            }
+        )
+    if insights:
+        return insights
+
+    for authority in authorities[:6]:
+        insights.append(
+            {
+                "title": authority.title,
+                "category": authority.topic,
+                "confidence": "low",
+                "why_it_matters": (
+                    f"This {authority.authority_type.replace('_', ' ')} is relevant to "
+                    f"{authority.topic.replace('_', ' ')}. It should inform scanner prioritization, "
+                    "but repo evidence still determines whether a finding is shown."
+                ),
+                "scanner_signal": authority.topic.replace("_", " "),
+                "recommendation": "Review matching repo evidence against this source-backed legal context.",
+                "citation": {
+                    "title": authority.title,
+                    "citation": authority.citation,
+                    "url": authority.url,
+                    "authority_type": authority.authority_type,
+                    "jurisdiction": authority.jurisdiction,
+                },
+                "source_interpretation": True,
+            }
+        )
+    return insights
+
+
+def _authority_preview(authority) -> dict:
+    return {
+        "source_id": authority.source_id,
+        "title": authority.title,
+        "authority_type": authority.authority_type,
+        "jurisdiction": authority.jurisdiction,
+        "topic": authority.topic,
+        "citation": authority.citation,
+        "url": authority.url,
+        "effective_date": authority.effective_date.isoformat() if authority.effective_date else None,
+        "metadata": authority.metadata,
+    }
+
+
+def _default_legal_insights(industry: str) -> list[dict]:
+    normalized = (industry or "tech").lower()
+    if normalized in {"finance", "fintech"}:
+        return [
+            {
+                "title": "Financial data controls should be prioritized in scanner results",
+                "category": "financial_compliance",
+                "confidence": "medium",
+                "why_it_matters": "Fintech and finance profiles are exposed to consumer-finance, security, privacy, and disclosure obligations. Scanner findings involving payment data, access controls, and audit trails should be elevated.",
+                "scanner_signal": "payment flows, customer financial data, audit logs, KYC/AML language, access control gaps",
+                "recommendation": "Prioritize remediation for repository evidence involving payment data, financial records, weak authentication, or missing incident-response documentation.",
+                "citation": {"title": "Configured sources: CFPB, SEC, FTC, eCFR Titles 12 and 17", "citation": "Public legal source presets", "authority_type": "agency_guidance", "jurisdiction": "US"},
+                "source_interpretation": True,
+            },
+            {
+                "title": "Privacy disclosures should line up with data collection in code",
+                "category": "privacy",
+                "confidence": "medium",
+                "why_it_matters": "Financial products commonly process sensitive customer data. Legal context should cause privacy-policy and consent gaps to rank higher when scanner evidence shows analytics, tracking, or personal-data collection.",
+                "scanner_signal": "analytics SDKs, tracking calls, user identifiers, privacy policy absence",
+                "recommendation": "Match collection points in code to public notices, consent controls, retention language, and opt-out paths.",
+                "citation": {"title": "Configured sources: FTC and CFPB privacy/security feeds", "citation": "Public legal source presets", "authority_type": "agency_guidance", "jurisdiction": "US"},
+                "source_interpretation": True,
+            },
+        ]
+    if normalized == "healthcare":
+        return [
+            {
+                "title": "Health-data handling should raise severity for security and privacy gaps",
+                "category": "healthcare",
+                "confidence": "medium",
+                "why_it_matters": "Healthcare profiles can involve PHI, patient workflows, or FDA/HHS-adjacent obligations. Scanner evidence involving health identifiers, access controls, logs, and data sharing should receive stronger legal context.",
+                "scanner_signal": "patient data, PHI references, access control gaps, missing security policy, health integrations",
+                "recommendation": "Treat health-data findings as priority remediation items and document safeguards, retention, breach response, and vendor controls.",
+                "citation": {"title": "Configured sources: HHS OCR and eCFR Titles 21 and 45", "citation": "Public legal source presets", "authority_type": "agency_guidance", "jurisdiction": "US"},
+                "source_interpretation": True,
+            }
+        ]
+    return [
+        {
+            "title": "Privacy and security evidence should drive legal-risk prioritization",
+            "category": "privacy",
+            "confidence": "medium",
+            "why_it_matters": "Technology companies commonly collect customer, usage, and account data. Scanner findings involving tracking, personal data, secrets, weak authentication, or missing disclosure documents should be framed with privacy and consumer-protection context.",
+            "scanner_signal": "analytics SDKs, personal data collection, exposed secrets, missing SECURITY.md or privacy policy",
+            "recommendation": "Prioritize findings that connect code evidence to customer data handling, security controls, disclosure gaps, and consent/opt-out expectations.",
+            "citation": {"title": "Configured sources: FTC, Federal Register, Regulations.gov, eCFR Title 16", "citation": "Public legal source presets", "authority_type": "agency_guidance", "jurisdiction": "US"},
+            "source_interpretation": True,
+        },
+        {
+            "title": "AI and data-governance signals should stay separate from deterministic repo evidence",
+            "category": "ai_data_governance",
+            "confidence": "medium",
+            "why_it_matters": "Legal intelligence should guide scanner priorities without overstating certainty. AI/data-governance findings should clearly distinguish source-backed interpretation from concrete repository evidence.",
+            "scanner_signal": "training data references, model prompts, automated decisioning, data-retention gaps",
+            "recommendation": "Show repo evidence first, then attach legal context with citations and confidence labels.",
+            "citation": {"title": "Configured sources: Federal Register AI/privacy and FTC data-security feeds", "citation": "Public legal source presets", "authority_type": "agency_guidance", "jurisdiction": "US"},
+            "source_interpretation": True,
+        },
+    ]
+
+
 # ── /api/scan ─────────────────────────────────────────────────────────────────
 
 class RepoScanRequest(BaseModel):
@@ -1146,9 +1666,7 @@ def scan_repo(req: RepoScanRequest):
     import time
     import re as _re
 
-    startup_risk_root = Path(__file__).resolve().parents[1] / "startup-risk"
-    if str(startup_risk_root) not in sys.path:
-        sys.path.insert(0, str(startup_risk_root))
+    _ensure_startup_risk_path()
 
     try:
         from startup_risk.core.engine import ScanEngine
@@ -1173,6 +1691,13 @@ def scan_repo(req: RepoScanRequest):
         result = ScanEngine(
             ingestor=RepositoryIngestor(),
             scanners=scanners,
+            legal_guidance_index=_load_startup_legal_guidance_index(
+                {
+                    "industry": req.industry,
+                    "product_name": req.product_name,
+                    **(req.questionnaire or {}),
+                }
+            ),
         ).scan(req.repo_url.strip())
     except Exception as exc:
         raise HTTPException(502, f"Scan failed: {exc}") from exc
@@ -1197,6 +1722,7 @@ def scan_repo(req: RepoScanRequest):
             "severity": f.severity,
             "confidence": f.confidence,
             "evidence": evidence,
+            "legal_context": [ctx.model_dump(mode="json") for ctx in getattr(f, "legal_context", [])],
             "recommendation": f.recommendation,
             "scanner": f.scanner_id,
         }

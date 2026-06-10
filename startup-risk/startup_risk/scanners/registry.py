@@ -60,6 +60,7 @@ def default_scanners(
         ),
         DependencyVulnScanner(enable_osv=vuln_osv),
         OutdatedDepsScanner(enable_registry=outdated_registry),
+        AnalyticsPrivacyScanner(),
         CodeComplianceScanner(),
         # LLM reasoning agents. Each is no-op safe: returns [] without an LLM key.
         AuthAccessControlAgent(),

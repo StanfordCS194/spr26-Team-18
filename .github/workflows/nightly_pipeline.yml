@@ -1,0 +1,56 @@
+name: Nightly Bill Pipeline
+
+on:
+  schedule:
+    # Runs at 02:00 UTC every night
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max bills to fetch from LegiScan"
+        required: false
+        default: "200"
+      skip_summarize:
+        description: "Skip LLM summarization (true/false)"
+        required: false
+        default: "false"
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run nightly pipeline
+        env:
+          LEGISCAN_API_KEY: ${{ secrets.LEGISCAN_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          ARGS="--limit ${{ github.event.inputs.limit || '200' }}"
+          if [ "${{ github.event.inputs.skip_summarize }}" = "true" ]; then
+            ARGS="$ARGS --no-summarize"
+          fi
+          python -m legi_bill.cli run-pipeline $ARGS
+
+      - name: Commit updated database
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/bills.db
+          if git diff --cached --quiet; then
+            echo "No DB changes to commit."
+          else
+            git commit -m "chore: nightly bill pipeline update [skip ci]"
+            git push
+          fi

@@ -14,7 +14,6 @@ import {
   Rocket,
   Scale,
   ShieldAlert,
-  Sparkles,
   Users,
   RefreshCw,
 } from "lucide-react";
@@ -190,7 +189,7 @@ export default function HomePage({
             {companyName} dashboard
           </h1>
           <p className="mt-1 max-w-[680px] text-[14px] leading-relaxed text-text-secondary">
-            Track repository risk, startup health, legal exposure, and action items from one working view.
+            Track repository risk, legal exposure, financial readiness, and action items from one working view.
           </p>
         </div>
         <div className="flex gap-2">
@@ -329,10 +328,10 @@ export default function HomePage({
               onClick={() => onTabChange(hasScan ? "issues" : "scanner")}
             />
             <WorkItem
-              title="Grade startup health"
-              body="Score legal, financial, product, engineering, and compliance readiness."
-              action="Grade"
-              onClick={() => onTabChange("startup")}
+              title="Review legal intelligence"
+              body="Open source-backed legal context and automatic legal savings."
+              action="Open"
+              onClick={() => onTabChange("legal")}
             />
             <WorkItem
               title="Compare benchmarks"
@@ -364,13 +363,6 @@ export default function HomePage({
           title="Benchmark"
           body="Compare findings to sample advisory patterns and industry scenarios."
           Icon={FlaskConical}
-          onTabChange={onTabChange}
-        />
-        <NavCard
-          id="startup"
-          title="Startup Health"
-          body="Generate a multi-axis readiness grade from business and technical inputs."
-          Icon={Sparkles}
           onTabChange={onTabChange}
         />
         <NavCard

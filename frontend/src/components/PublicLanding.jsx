@@ -268,13 +268,13 @@ const EMPTY_PROFILE = {
 };
 
 const DEMO_PROFILE = {
-  companyName: "Octo Labs",
-  industry: "other",
+  companyName: "GradeA Labs",
+  industry: "devtools",
   stage: "seed",
   customers: "developer",
-  sensitiveData: "none",
+  sensitiveData: "pii",
   gtm: "plg",
-  repoUrl: "https://github.com/octocat/Hello-World",
+  repoUrl: "https://github.com/pallets/click",
 };
 
 const LANDING_STEPS = [
@@ -300,7 +300,7 @@ const LANDING_STEPS = [
     n: "03",
     kind: "money",
     title: "Review your action plan",
-    body: "Get evidence-backed findings, benchmarks, startup health, and prioritized next steps.",
+    body: "Get evidence-backed findings, benchmarks, legal insights, and prioritized next steps.",
     tags: ["Findings", "Benchmarks", "Next steps"],
     color: "#FF6B00",
     bgColor: "#FFEDD5",

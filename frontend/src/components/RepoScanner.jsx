@@ -480,7 +480,7 @@ function ResultsView({ results, repoUrl, industry, onboardingProfile, onReset, o
 function WorkspaceReady({ profile, onNavigate }) {
   const links = [
     { id: "benchmark", label: "Benchmark", body: "Compare scanner signals against advisory-style examples." },
-    { id: "startup", label: "Startup Health", body: "Grade legal, financial, product, and custom AI readiness." },
+    { id: "legal", label: "Legal Insights", body: "Review source-backed legal context and automatic savings." },
     { id: "recs", label: "Recommendations", body: "Track the highest-leverage fixes from your workspace." },
   ];
   return (

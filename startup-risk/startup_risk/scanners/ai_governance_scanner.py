@@ -322,7 +322,7 @@ class AIGovernanceScanner:
                 "NIST AI RMF GOVERN 1.1 requires similar transparency for all AI systems."
             ),
             category="ai_governance",
-            severity="medium",
+            severity="low",
             confidence="medium",
             evidence=evidence,
             recommendation=(
@@ -355,7 +355,7 @@ class AIGovernanceScanner:
                 "US Equal Credit Opportunity Act (ECOA), and FTC guidance on algorithmic bias."
             ),
             category="ai_governance",
-            severity="high",
+            severity="low",
             confidence="low",
             evidence=evidence,
             recommendation=(
@@ -394,7 +394,7 @@ class AIGovernanceScanner:
                 "consumer-facing decisions or communications."
             ),
             category="ai_governance",
-            severity="medium",
+            severity="low",
             confidence="low",
             evidence=evidence,
             recommendation=(
@@ -437,7 +437,7 @@ class AIGovernanceScanner:
                     "US FCRA and ECOA require adverse-action notices and the right to dispute."
                 ),
                 category="ai_governance",
-                severity="high",
+                severity="low",
                 confidence="medium",
                 evidence=[FindingEvidence(
                     location=SourceLocation(path=file.path, line_start=i + 1, line_end=i + 1),
@@ -525,7 +525,7 @@ class AIGovernanceScanner:
                     "NIST AI RMF MAP 2.3."
                 ),
                 category="ai_governance",
-                severity="medium",
+                severity="low",
                 confidence="low",
                 evidence=[FindingEvidence(
                     location=SourceLocation(path=file.path, line_start=i + 1, line_end=i + 1),

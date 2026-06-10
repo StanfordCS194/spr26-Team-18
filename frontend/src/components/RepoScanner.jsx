@@ -6,6 +6,7 @@ import {
   ShieldAlert, FileSearch, Package, Lock, BarChart2,
   Loader2, ExternalLink, ChevronDown, ChevronUp,
   KeyRound, Bug, RefreshCw, ShieldCheck, Sparkles,
+  Scale, GitMerge, EyeOff, Gauge,
 } from "lucide-react";
 
 // ── Industry verticals ────────────────────────────────────────────────────────
@@ -37,7 +38,11 @@ const BASE_SCANNERS = [
   { id: "pii_data_flow",   kind: "agent",   label: "PII data-flow agent",     Icon: Globe,       desc: "Traces personal data; retention, consent, encryption gaps" },
   { id: "infra_misconfig", kind: "agent",   label: "Infra misconfig agent",   Icon: Building2,   desc: "Dockerfiles, CORS, exposed ports, IaC settings" },
   { id: "vuln_exploitability", kind: "agent", label: "Vuln exploitability agent", Icon: Package,  desc: "Reachability of known CVEs in your code" },
-  { id: "custom_compliance", kind: "agent", label: "AI-tailored agent",       Icon: Sparkles,    desc: "Startup-specific rules generated from your profile" },
+  { id: "custom_compliance", kind: "agent",    label: "AI-tailored agent",           Icon: Sparkles,   desc: "Startup-specific rules generated from your profile" },
+  { id: "legal_docs",        kind: "scanner", label: "Legal document presence",     Icon: Scale,      desc: "ToS, Privacy Policy, Cookie Policy, DMCA" },
+  { id: "cicd_security",     kind: "scanner", label: "CI/CD pipeline security",     Icon: GitMerge,   desc: "Unpinned actions, pull_request_target, write-all" },
+  { id: "error_disclosure",  kind: "scanner", label: "Error & info disclosure",     Icon: EyeOff,     desc: "Debug mode, exception details in responses" },
+  { id: "rate_limiting",     kind: "scanner", label: "Rate limiting on auth",       Icon: Gauge,      desc: "Brute-force protection on login & register routes" },
 ];
 
 // Industry-specific scanners shown as aspirational (coming soon) in the scanner preview
@@ -66,6 +71,10 @@ const SCANNER_LABELS = {
   infra_misconfig: "Infra Misconfig Agent",
   vuln_exploitability: "Vuln Exploitability Agent",
   custom_compliance: "AI-Tailored Agent",
+  legal_docs:        "Legal Docs",
+  cicd_security:     "CI/CD Security",
+  error_disclosure:  "Error Disclosure",
+  rate_limiting:     "Rate Limiting",
 };
 
 // ── Severity config ───────────────────────────────────────────────────────────

@@ -16,7 +16,7 @@ from startup_risk.core.models import (
 from startup_risk.scanners.license_scanner.discovery import discover
 from startup_risk.scanners.license_scanner.models import Dependency
 from startup_risk.scanners.license_scanner.parsers import (
-    dotnet, generic, go, java, npm, php, python, ruby, rust,
+    dotnet, go, java, npm, php, python, ruby, rust,
 )
 
 
@@ -71,7 +71,7 @@ def _dispatch_parser(file) -> list[Dependency]:
         return php.parse(file)
     if filename.endswith(".csproj") or filename == "packages.lock.json":
         return dotnet.parse(file)
-    return generic.parse(file)
+    return []
 
 
 def _parse_deps(snapshot: RepositorySnapshot) -> list[Dependency]:

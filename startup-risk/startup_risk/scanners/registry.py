@@ -35,7 +35,7 @@ def default_scanners(
     license_registry_metadata: bool = False,
     license_artifact_inspection: bool = False,
     license_source_repo: bool = False,
-    vuln_osv: bool = False,
+    vuln_osv: bool = True,
     outdated_registry: bool = True,
     custom_questionnaire: dict | None = None,
     custom_prd_text: str | None = None,

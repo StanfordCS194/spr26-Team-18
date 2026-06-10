@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Sidebar from "./components/Sidebar";
 import HomePage from "./components/HomePage";
 import PublicLanding from "./components/PublicLanding";
@@ -113,7 +114,8 @@ export default function App() {
         onResetDemo={handleResetDemo}
       />
       <main className="ml-64 px-10 pb-20 pt-10">
-        <div className="mx-auto max-w-[1080px] animate-fade-in" key={activeTab}>
+        <ErrorBoundary key={activeTab}>
+         <div className="mx-auto max-w-[1080px] animate-fade-in">
           {activeTab === "home" && <HomePage onTabChange={changeTab} />}
           {activeTab === "scanner" && (
             <RepoScanner
@@ -135,7 +137,8 @@ export default function App() {
             />
           )}
           {activeTab === "financial" && <FinancialCompliance />}
-        </div>
+         </div>
+        </ErrorBoundary>
       </main>
     </div>
   );

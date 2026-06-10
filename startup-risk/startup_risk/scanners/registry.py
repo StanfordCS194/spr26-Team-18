@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from startup_risk.scanners.ai_governance_scanner import AIGovernanceScanner
 from startup_risk.scanners.analytics_privacy import AnalyticsPrivacyScanner
+from startup_risk.scanners.crypto_misuse_scanner import CryptoMisuseScanner
 from startup_risk.scanners.auth_agent import AuthAccessControlAgent
 from startup_risk.scanners.cicd_scanner import CICDSecurityScanner
 from startup_risk.scanners.error_disclosure_scanner import ErrorDisclosureScanner
@@ -67,6 +68,7 @@ def default_scanners(
         OutdatedDepsScanner(enable_registry=outdated_registry),
         AnalyticsPrivacyScanner(),
         AIGovernanceScanner(),
+        CryptoMisuseScanner(),
         CodeComplianceScanner(),
         # LLM reasoning agents. Each is no-op safe: returns [] without an LLM key.
         AuthAccessControlAgent(),

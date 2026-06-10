@@ -31,6 +31,11 @@ _CONTEXT_RADIUS = 6
 # Ordered from earliest to latest stage — used for stage_gte comparisons.
 _STAGES = ["pre_seed", "seed", "series_a", "series_b", "series_c_plus"]
 
+# Industries that typically have significant R&D expenditure (§41 / §174 rules).
+_RD_INDUSTRIES = frozenset({"saas", "software", "hardware", "iot", "biotech", "life_sciences", "deeptech"})
+# Industries where complex revenue recognition (ASC 606) is most relevant.
+_SUBSCRIPTION_INDUSTRIES = frozenset({"saas", "software", "fintech", "ecommerce", "marketplace"})
+
 _STAGE_ALIASES: dict[str, str] = {
     "pre-seed": "pre_seed",
     "preseed": "pre_seed",
@@ -437,8 +442,26 @@ class FinancialComplianceScanner:
     name = "Financial Compliance"
     version = "1.3.0"
 
-    def __init__(self, *, funding_round: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        funding_round: str | None = None,
+        entity_type: str | None = None,
+        industry: str | None = None,
+        international: bool | None = None,
+        multi_state: bool | None = None,
+    ) -> None:
         self._stage = _normalize_stage(funding_round)
+        ent = (entity_type or "").lower().replace("-", "_").replace(" ", "_")
+        ind = (industry or "").lower().replace(" / ", "_").replace("/", "_").replace(" ", "_")
+        # Gate flags — unknown (None / empty) = fail-safe, run the rule.
+        self._corp_only   = not ent or ent == "c_corp"   # ISOs, QSBS, ESPP, §280G, §162(m)
+        self._has_rd      = not ind or any(k in ind for k in _RD_INDUSTRIES)
+        self._has_sub_rev = not ind or any(k in ind for k in _SUBSCRIPTION_INDUSTRIES)
+        # international=None means unknown → run rule. international=False → skip.
+        self._intl        = international is not False
+        # multi_state=None/False → skip state-nexus rule (too many false positives).
+        self._multi_state = bool(multi_state)
 
     @property
     def stage(self) -> str:
@@ -528,7 +551,7 @@ class FinancialComplianceScanner:
 
                 # §1202 QSBS — Seed+: qualification is locked in at issuance and can
                 # mean a 100% capital-gains exclusion for investors; no retroactive fixes.
-                if _STOCK_ISSUANCE.search(stripped) and not _QSBS_CONTROLS.search(ctx):
+                if self._corp_only and _STOCK_ISSUANCE.search(stripped) and not _QSBS_CONTROLS.search(ctx):
                     findings.append(self._finding(
                         rule="stock_issuance_no_qsbs",
                         title="Stock issuance without IRC §1202 QSBS qualification tracking",
@@ -555,7 +578,7 @@ class FinancialComplianceScanner:
 
                 # §174 mandatory amortization — Seed+: post-2022 change requires all
                 # R&D expenditures to be capitalized and amortized, not expensed immediately.
-                if _RD_COST_TREATMENT.search(stripped) and not _174_AMORTIZATION_CTRL.search(ctx):
+                if self._has_rd and _RD_COST_TREATMENT.search(stripped) and not _174_AMORTIZATION_CTRL.search(ctx):
                     findings.append(self._finding(
                         rule="rd_expense_no_174_amortization",
                         title="R&D expenditures treated as immediately expensed without IRC §174 amortization",
@@ -586,7 +609,7 @@ class FinancialComplianceScanner:
                 # State income tax nexus — Seed+: a single remote employee in another
                 # state creates corporate income tax and payroll registration obligations
                 # distinct from Wayfair sales tax nexus.
-                if _REMOTE_EMPLOYEE_STATE.search(stripped) and not _STATE_NEXUS_CTRL.search(ctx):
+                if self._multi_state and _REMOTE_EMPLOYEE_STATE.search(stripped) and not _STATE_NEXUS_CTRL.search(ctx):
                     findings.append(self._finding(
                         rule="remote_employee_no_state_nexus",
                         title="Remote employee in another state without state income tax nexus analysis",
@@ -724,7 +747,7 @@ class FinancialComplianceScanner:
 
             # Form 3921 / AMT — Series A+: ISO exercises trigger mandatory reporting.
             if _stage_gte(self._stage, "series_a"):
-                if _ISO_EXERCISE.search(stripped) and not _FORM_3921.search(ctx):
+                if self._corp_only and _ISO_EXERCISE.search(stripped) and not _FORM_3921.search(ctx):
                     findings.append(self._finding(
                         rule="iso_exercise_no_form_3921",
                         title="ISO exercise without Form 3921 / AMT disclosure",
@@ -749,7 +772,7 @@ class FinancialComplianceScanner:
 
                 # §422(d) ISO $100K limit — Series A+: excess ISOs silently become NSOs,
                 # converting capital-gain treatment at sale into ordinary income at exercise.
-                if _ISO_GRANT.search(stripped) and not _ISO_100K_LIMIT.search(ctx):
+                if self._corp_only and _ISO_GRANT.search(stripped) and not _ISO_100K_LIMIT.search(ctx):
                     findings.append(self._finding(
                         rule="iso_grant_no_100k_limit",
                         title="ISO grant without IRC §422(d) $100K annual-limit check",
@@ -807,7 +830,7 @@ class FinancialComplianceScanner:
                 # ESPP Form 3922 — Series A+: each ESPP stock transfer requires
                 # a Form 3922 filed by January 31; the transfer record is the only
                 # contemporaneous documentation that determines the sale's tax treatment.
-                if _ESPP_ACTIVITY.search(stripped) and not _FORM_3922.search(ctx):
+                if self._corp_only and _ESPP_ACTIVITY.search(stripped) and not _FORM_3922.search(ctx):
                     findings.append(self._finding(
                         rule="espp_no_form_3922",
                         title="ESPP activity without Form 3922 transfer-reporting reference",
@@ -858,7 +881,7 @@ class FinancialComplianceScanner:
                     ))
 
                 # FBAR / FATCA — Series B+: foreign accounts above $10K aggregate.
-                if _INTL_PAYMENT.search(stripped) and not _FBAR_CONTROLS.search(ctx):
+                if self._intl and _INTL_PAYMENT.search(stripped) and not _FBAR_CONTROLS.search(ctx):
                     findings.append(self._finding(
                         rule="intl_transfer_no_fbar",
                         title="International wire transfer without FBAR / FATCA compliance signals",
@@ -884,7 +907,7 @@ class FinancialComplianceScanner:
 
                 # §382 NOL limitation — Series B+: equity financing rounds can trigger
                 # ownership changes that cap annual NOL utilization permanently.
-                if _NOL_TRACKING.search(stripped) and not _NOL_382.search(ctx):
+                if self._corp_only and _NOL_TRACKING.search(stripped) and not _NOL_382.search(ctx):
                     findings.append(self._finding(
                         rule="nol_no_382_limit",
                         title="NOL carryforward tracked without IRC §382 ownership-change limitation",
@@ -910,7 +933,7 @@ class FinancialComplianceScanner:
 
                 # §41 R&D Credit — Series B+: qualifying research expenses need contemporaneous
                 # documentation; §174 amortization now mandatory (TCJA 2017, effective 2022).
-                if _RD_EXPENSE.search(stripped) and not _RD_CREDIT.search(ctx):
+                if self._has_rd and _RD_EXPENSE.search(stripped) and not _RD_CREDIT.search(ctx):
                     findings.append(self._finding(
                         rule="rd_expense_no_credit_tracking",
                         title="R&D expense tracked without IRC §41 research credit documentation",
@@ -937,7 +960,7 @@ class FinancialComplianceScanner:
 
                 # §280G / §4999 golden parachute — Series B+: change-of-control payments
                 # over 3× base comp trigger a 20% excise tax and lose deductibility.
-                if _CHANGE_OF_CONTROL.search(stripped) and not _PARACHUTE_CONTROLS.search(ctx):
+                if self._corp_only and _CHANGE_OF_CONTROL.search(stripped) and not _PARACHUTE_CONTROLS.search(ctx):
                     findings.append(self._finding(
                         rule="change_of_control_no_280g",
                         title="Change-of-control acceleration without IRC §280G analysis",
@@ -968,7 +991,7 @@ class FinancialComplianceScanner:
 
                 # §482 transfer pricing — Series B+: every related-party transaction
                 # must use arm's-length pricing with contemporaneous documentation.
-                if _INTERCOMPANY_TX.search(stripped) and not _TRANSFER_PRICING.search(ctx):
+                if self._intl and _INTERCOMPANY_TX.search(stripped) and not _TRANSFER_PRICING.search(ctx):
                     findings.append(self._finding(
                         rule="intercompany_no_transfer_pricing",
                         title="Intercompany transaction without IRC §482 transfer-pricing documentation",
@@ -996,7 +1019,7 @@ class FinancialComplianceScanner:
 
                 # GILTI / Subpart F §951A — Series B+: US shareholders of CFCs must
                 # include foreign subsidiary income in US gross income annually.
-                if _FOREIGN_SUBSIDIARY.search(stripped) and not _GILTI_CONTROLS.search(ctx):
+                if self._intl and _FOREIGN_SUBSIDIARY.search(stripped) and not _GILTI_CONTROLS.search(ctx):
                     findings.append(self._finding(
                         rule="foreign_subsidiary_no_gilti",
                         title="Foreign subsidiary income without GILTI (§951A) / Subpart F analysis",
@@ -1024,7 +1047,7 @@ class FinancialComplianceScanner:
 
             # §162(m) exec comp deduction limit — Series C+.
             if _stage_gte(self._stage, "series_c_plus"):
-                if _EXEC_COMP.search(stripped) and not _COMP_162M.search(ctx):
+                if self._corp_only and _EXEC_COMP.search(stripped) and not _COMP_162M.search(ctx):
                     findings.append(self._finding(
                         rule="exec_comp_no_162m",
                         title="Executive compensation without IRC §162(m) deduction-limit analysis",
@@ -1052,7 +1075,7 @@ class FinancialComplianceScanner:
 
                 # ASC 606 / IRC §451 revenue recognition — Series C+: the five-step
                 # model governs both GAAP and taxable income recognition post-TCJA.
-                if _REVENUE_RECOGNITION.search(stripped) and not _ASC_606_CONTROLS.search(ctx):
+                if self._has_sub_rev and _REVENUE_RECOGNITION.search(stripped) and not _ASC_606_CONTROLS.search(ctx):
                     findings.append(self._finding(
                         rule="revenue_no_asc606",
                         title="Revenue recognition code without ASC 606 / IRC §451 framework reference",

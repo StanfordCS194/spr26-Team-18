@@ -840,21 +840,99 @@ _COMPLIANCE_SYSTEM = (
 )
 
 
+_INTL_KEYWORDS     = ("fbar", "fatca", "gilti", "§482", "transfer pricing", "cfc", "form 5471",
+                      "subpart f", "foreign subsidiary", "offshore", "international")
+_RD_KEYWORDS       = ("r&d", "§41", "§174", "research credit", "qre", "research expense",
+                      "development cost", "174 amortiz")
+_CORP_KEYWORDS     = ("qsbs", "§1202", "iso", "espp", "§422", "form 3921", "form 3922",
+                      "§280g", "§162(m)", "162(m)", "incentive stock")
+_STATE_KEYWORDS    = ("state income tax nexus", "apportionment", "state corporate",
+                      "throwback", "single sales factor")
+_RD_API_INDUSTRIES = frozenset({"saas", "software", "hardware", "iot", "biotech",
+                                 "life_sciences", "life sciences", "deeptech"})
+_SUB_API_INDUSTRIES = frozenset({"saas", "software", "fintech", "ecommerce", "marketplace"})
+
+
+def _filter_requirements(
+    requirements: list[str],
+    entity_type: str | None,
+    industry: str | None,
+    international: str | None,
+    multi_state: bool,
+) -> list[str]:
+    """Return only the compliance requirements applicable to this company's profile."""
+    ent = (entity_type or "").lower().replace("-", "_")
+    ind = (industry or "").lower().replace(" / ", "_").replace("/", "_").replace(" ", "_")
+
+    is_non_corp   = ent and ent != "c_corp"
+    is_domestic   = international == "no"
+    is_non_rd     = ind and not any(k in ind for k in _RD_API_INDUSTRIES)
+    is_non_sub_rev = ind and not any(k in ind for k in _SUB_API_INDUSTRIES)
+
+    filtered = []
+    for req in requirements:
+        low = req.lower()
+        if is_domestic   and any(k in low for k in _INTL_KEYWORDS):
+            continue
+        if is_non_corp   and any(k in low for k in _CORP_KEYWORDS):
+            continue
+        if is_non_rd     and any(k in low for k in _RD_KEYWORDS):
+            continue
+        if not multi_state and any(k in low for k in _STATE_KEYWORDS):
+            continue
+        filtered.append(req)
+    return filtered
+
+
 def _build_compliance_prompt(
     company_name: str,
     stage_key: str,
     documents: list[dict],  # [{"type": label, "text": str}]
+    entity_type: str | None = None,
+    company_size: str | None = None,
+    industry: str | None = None,
+    operating_states: list[str] | None = None,
+    international_presence: str | None = None,
 ) -> str:
     stage_name = _STAGE_DISPLAY_NAMES.get(stage_key, stage_key)
     requirements = _COMPLIANCE_STAGE_REQUIREMENTS.get(stage_key, [])
 
-    lines = [
-        f"COMPANY: {company_name}",
-        f"FUNDING STAGE: {stage_name}",
-        "",
-        f"CRITICAL COMPLIANCE AREAS FOR {stage_name.upper()}:",
-    ]
-    for req in requirements:
+    lines = [f"COMPANY: {company_name}", f"FUNDING STAGE: {stage_name}"]
+    if entity_type:
+        lines.append(f"ENTITY TYPE: {entity_type.replace('_', '-').upper()}")
+    if company_size:
+        lines.append(f"TEAM SIZE: {company_size.replace('_', '–')} employees")
+    if industry:
+        lines.append(f"INDUSTRY: {industry}")
+    if operating_states:
+        lines.append(f"OPERATING STATES: {', '.join(operating_states)}")
+        if len(operating_states) > 1:
+            lines.append(f"MULTI-STATE NOTE: {len(operating_states)} states — evaluate state income tax nexus, "
+                         "apportionment, and employer registration gaps for each state.")
+    if international_presence == "yes":
+        lines.append("INTERNATIONAL PRESENCE: Yes — flag FBAR (FinCEN 114), FATCA (Form 8938), "
+                     "GILTI (§951A), Subpart F (§951), and IRC §482 transfer pricing risks.")
+
+    # Entity-specific rules
+    entity_notes = {
+        "c_corp": "C-Corp: check QSBS §1202 eligibility (≤$50M gross assets) at every stock issuance.",
+        "s_corp": "S-Corp: flag any disqualifying events — non-US shareholders, >100 shareholders, "
+                  "or multiple stock classes invalidate S-Corp status retroactively.",
+        "llc":    "LLC: confirm tax election on file (default disregarded entity/partnership vs. "
+                  "C-Corp/S-Corp election via Form 8832/2553). QSBS §1202 requires C-Corp status.",
+    }
+    if entity_type and entity_type in entity_notes:
+        lines.append(f"ENTITY NOTE: {entity_notes[entity_type]}")
+
+    filtered_reqs = _filter_requirements(
+        requirements,
+        entity_type=entity_type,
+        industry=industry,
+        international=international_presence,
+        multi_state=bool(operating_states and len(operating_states) > 1),
+    )
+    lines += ["", f"CRITICAL COMPLIANCE AREAS FOR {stage_name.upper()}:"]
+    for req in filtered_reqs:
         lines.append(f"  • {req}")
 
     lines += ["", "DOCUMENTS PROVIDED:"]
@@ -868,6 +946,7 @@ def _build_compliance_prompt(
     lines += [
         "",
         "Evaluate each compliance area listed above against the documents provided. "
+        "Where multiple states are listed, flag state-specific nexus and registration gaps. "
         "Flag any area where documentation is missing, incomplete, or shows a potential "
         "IRS/tax risk. Assign overall_risk and risk_score based on the number and severity "
         "of issues found.",
@@ -879,10 +958,15 @@ def _build_compliance_prompt(
 async def compliance_audit(
     company_name: Optional[str] = Form(None),
     funding_round: Optional[str] = Form(None),
+    entity_type: Optional[str] = Form(None),
+    company_size: Optional[str] = Form(None),
+    industry: Optional[str] = Form(None),
+    operating_states: Optional[str] = Form(None),   # JSON array of state codes
+    international_presence: Optional[str] = Form(None),  # "yes" | "no"
     document_text: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     files: List[UploadFile] = File(default=[]),
-    document_types: Optional[str] = Form(None),
+    document_types: Optional[str] = Form(None),     # JSON array of type labels
     llm_provider: Optional[str] = Form(None),
     llm_model: Optional[str] = Form(None),
 ):
@@ -922,7 +1006,23 @@ async def compliance_audit(
     if not documents:
         raise HTTPException(400, "Provide at least one file or document_text.")
 
-    prompt = _build_compliance_prompt(name, stage_key, documents)
+    states_list: list[str] = []
+    if operating_states:
+        try:
+            parsed = _json.loads(operating_states)
+            if isinstance(parsed, list):
+                states_list = [str(s) for s in parsed]
+        except (ValueError, TypeError):
+            pass
+
+    prompt = _build_compliance_prompt(
+        name, stage_key, documents,
+        entity_type=entity_type,
+        company_size=company_size,
+        industry=industry,
+        operating_states=states_list or None,
+        international_presence=international_presence,
+    )
     try:
         client = _get_llm_client(provider=llm_provider, model=llm_model)
         resp = client.complete(

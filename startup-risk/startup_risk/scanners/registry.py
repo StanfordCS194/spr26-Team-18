@@ -36,6 +36,10 @@ def default_scanners(
     custom_questionnaire: dict | None = None,
     custom_prd_text: str | None = None,
     funding_round: str | None = None,
+    entity_type: str | None = None,
+    industry: str | None = None,
+    international: bool | None = None,
+    multi_state: bool | None = None,
 ) -> list[Scanner]:
     return [
         StaticHygieneScanner(),

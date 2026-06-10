@@ -1,3 +1,5 @@
+@config "../tailwind.config.js";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,37 +7,39 @@
 @layer base {
   :root {
     /* ── Text ── */
-    --text-primary: #2d2d44;
-    --text-secondary: #6b6885;
-    --text-muted: #a09cb5;
+    --text-primary: #050a14;
+    --text-secondary: #3d5080;
+    --text-muted: #7a90b8;
     --text-invert: #ffffff;
 
     /* ── Surfaces ── */
     --bg-card: #ffffff;
-    --bg-nav: #efe9f6;          /* sidebar (soft lavender) */
-    --bg-action: #c9b6e8;       /* primary accent (muted lavender) */
-    --bg-action-dark: #8b7cb6;  /* CTA buttons (deeper lavender) */
-    --bg-chip: #f6f1f9;
-    --bg-chip-alt: #f1ecf5;
+    --bg-nav: #0d1b3e;
+    --bg-action: #3b82f6;
+    --bg-action-dark: #0052ff;
+    --bg-chip: #eef3ff;
+    --bg-chip-alt: #e8f5e9;
 
     /* ── Borders ── */
-    --border-border: #ece6f0;
-    --border-muted: #f1edf4;
-    --border-chip: #e1d8ea;
+    --border-border: #d4e0ff;
+    --border-muted: #e8eeff;
+    --border-chip: #c7d8ff;
 
     /* ── Accents ── */
-    --accent-gold: #f4b9a0;       /* peach (replaces gold) */
-    --accent-gold-soft: rgba(244, 185, 160, 0.55);
+    --accent-gold: #ff6b00;
+    --accent-gold-soft: rgba(255, 107, 0, 0.2);
+    --accent-green: #00c853;
+    --accent-blue: #0052ff;
 
-    /* ── Status pills (soft pastel) ── */
-    --status-chaptered-bg: #d4e7d2;
-    --status-chaptered-text: #527a4d;
-    --status-enrolled-bg: #d8d2eb;
-    --status-enrolled-text: #5c4f7c;
-    --status-committee-bg: #f7e0c9;
-    --status-committee-text: #8b5e3a;
-    --status-default-bg: #ebe7ed;
-    --status-default-text: #6e6a78;
+    /* ── Status pills (vivid) ── */
+    --status-chaptered-bg: #ccfce7;
+    --status-chaptered-text: #00874a;
+    --status-enrolled-bg: #dbeafe;
+    --status-enrolled-text: #1d4ed8;
+    --status-committee-bg: #ffedd5;
+    --status-committee-text: #c2410c;
+    --status-default-bg: #f1f5f9;
+    --status-default-text: #475569;
   }
 
   body {
@@ -67,14 +71,14 @@
   .grade-stamp { animation: grade-stamp 0.55s cubic-bezier(0.16,1,0.3,1) both; }
 
   @keyframes slide-up {
-    from { opacity: 0; transform: translateY(20px); }
+    from { opacity: 0; transform: translateY(24px); }
     to   { opacity: 1; transform: translateY(0); }
   }
   .animate-slide-up { animation: slide-up 0.5s cubic-bezier(0.16,1,0.3,1) both; }
 
   @keyframes float {
     0%, 100% { transform: translateY(0px); }
-    50%       { transform: translateY(-5px); }
+    50%       { transform: translateY(-7px); }
   }
   .animate-float { animation: float 3s ease-in-out infinite; }
 
@@ -85,10 +89,11 @@
   .animate-shimmer-text {
     background: linear-gradient(
       90deg,
-      var(--text-primary) 0%,
-      var(--accent-gold) 35%,
-      #c9b6e8 55%,
-      var(--text-primary) 80%
+      #050a14 0%,
+      #0052ff 30%,
+      #00c853 55%,
+      #ff6b00 75%,
+      #050a14 100%
     );
     background-size: 200% auto;
     -webkit-background-clip: text;
@@ -96,4 +101,10 @@
     background-clip: text;
     animation: shimmer-text 4s linear infinite;
   }
+
+  @keyframes pulse-ring {
+    0%   { transform: scale(1); opacity: 0.5; }
+    100% { transform: scale(1.6); opacity: 0; }
+  }
+  .animate-pulse-ring { animation: pulse-ring 2s ease-out infinite; }
 }

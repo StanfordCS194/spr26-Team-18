@@ -11,6 +11,7 @@ from startup_risk.core.engine import ScanEngine
 from startup_risk.ingest.repository import RepositoryIngestor
 from startup_risk.outputs.json_output import result_to_json
 from startup_risk.outputs.text_output import render_text
+from startup_risk.scanners.dependency_scanner import DependencyRiskScanner
 from startup_risk.scanners.license_scanner import LicenseRiskScanner
 from startup_risk.scanners.registry import default_scanners
 
@@ -23,6 +24,7 @@ class OutputFormat(str, Enum):
 class LicenseLLMProvider(str, Enum):
     openai = "openai"
     anthropic = "anthropic"
+    gemini = "gemini"
 
 
 app = typer.Typer(
@@ -51,6 +53,10 @@ def scan(
     license_llm_provider: Annotated[
         LicenseLLMProvider | None,
         typer.Option("--license-llm-provider", help="Batch LLM provider for license scanning."),
+    ] = None,
+    license_llm_model: Annotated[
+        str | None,
+        typer.Option("--license-llm-model", help="Batch LLM model for license scanning."),
     ] = None,
     license_batch_timeout_hours: Annotated[
         float,
@@ -92,15 +98,71 @@ def scan(
         bool,
         typer.Option("--license-only", help="Run only the license scanner, excluding repository hygiene findings."),
     ] = False,
+    dependency_only: Annotated[
+        bool,
+        typer.Option("--dependency-only", help="Run only the dependency supply-chain scanner."),
+    ] = False,
+    dependency_verbose: Annotated[
+        bool,
+        typer.Option("--dependency-verbose", help="Include verbose dependency-level hygiene findings."),
+    ] = False,
+    vuln_osv: Annotated[
+        bool,
+        typer.Option("--vuln-osv", help="Query the OSV vulnerability database for known CVEs in pinned dependencies."),
+    ] = False,
+    funding_round: Annotated[
+        str | None,
+        typer.Option(
+            "--funding-round",
+            help=(
+                "Funding stage for IRS/tax compliance rules. Accepted values: "
+                "pre-seed, seed, series-a, series-b, series-c (or c+), growth, pre-ipo. "
+                "Defaults to seed when omitted."
+            ),
+        ),
+    ] = None,
+    entity_type: Annotated[
+        str | None,
+        typer.Option(
+            "--entity-type",
+            help="Legal entity type: c_corp, s_corp, llc, other. Skips inapplicable rules (e.g. ISOs/QSBS for non-C-Corps).",
+        ),
+    ] = None,
+    industry: Annotated[
+        str | None,
+        typer.Option(
+            "--industry",
+            help="Primary industry: saas, fintech, hardware, biotech, ecommerce, other. Skips irrelevant rules (e.g. R&D rules for non-tech).",
+        ),
+    ] = None,
+    international: Annotated[
+        bool | None,
+        typer.Option(
+            "--international/--no-international",
+            help="Whether the company has foreign operations or bank accounts. Skips FBAR/GILTI/§482 rules when --no-international.",
+        ),
+    ] = None,
+    multi_state: Annotated[
+        bool | None,
+        typer.Option(
+            "--multi-state/--no-multi-state",
+            help="Whether the company has employees in more than one state. Enables state income tax nexus checks when --multi-state.",
+        ),
+    ] = None,
 ) -> None:
     """Scan a repository using static parsing only."""
     console = Console()
+    if license_only and dependency_only:
+        raise typer.BadParameter("--license-only and --dependency-only cannot be used together.")
     ingestor = RepositoryIngestor(max_file_bytes=max_file_bytes)
-    scanners = (
-        [
+    if dependency_only:
+        scanners = [DependencyRiskScanner(verbose=dependency_verbose)]
+    elif license_only:
+        scanners = [
             LicenseRiskScanner(
                 deterministic_only=deterministic_only,
                 provider_name=license_llm_provider.value if license_llm_provider else None,
+                model_name=license_llm_model,
                 batch_timeout_seconds=int(license_batch_timeout_hours * 60 * 60),
                 poll_interval_seconds=license_poll_interval_seconds,
                 llm_prompt_token_budget=license_llm_prompt_token_budget,
@@ -111,10 +173,11 @@ def scan(
                 enable_source_repo=license_source_repo,
             )
         ]
-        if license_only
-        else default_scanners(
+    else:
+        scanners = default_scanners(
             deterministic_license_only=deterministic_only,
             license_llm_provider=license_llm_provider.value if license_llm_provider else None,
+            license_llm_model=license_llm_model,
             license_batch_timeout_seconds=int(license_batch_timeout_hours * 60 * 60),
             license_poll_interval_seconds=license_poll_interval_seconds,
             license_llm_prompt_token_budget=license_llm_prompt_token_budget,
@@ -123,8 +186,13 @@ def scan(
             license_registry_metadata=license_registry_metadata,
             license_artifact_inspection=license_artifact_inspection,
             license_source_repo=license_source_repo,
+            vuln_osv=vuln_osv,
+            funding_round=funding_round,
+            entity_type=entity_type,
+            industry=industry,
+            international=international,
+            multi_state=multi_state,
         )
-    )
     engine = ScanEngine(
         ingestor=ingestor,
         scanners=scanners,

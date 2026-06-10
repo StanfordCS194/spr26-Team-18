@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 import tomllib
 
 from startup_risk.core.models import FileSnapshot
@@ -18,6 +19,10 @@ def parse(file: FileSnapshot) -> list[Dependency]:
         return _parse_pyproject(file)
     if filename == "poetry.lock":
         return _parse_poetry_lock(file)
+    if filename == "pipfile.lock":
+        return _parse_pipfile_lock(file)
+    if filename == "uv.lock":
+        return _parse_uv_lock(file)
     return []
 
 
@@ -164,6 +169,85 @@ def _parse_poetry_lock(file: FileSnapshot) -> list[Dependency]:
                         text=f"{name}@{version}",
                         detected_license=license_value,
                         confidence="high" if license_value else "none",
+                    )
+                ],
+            )
+        )
+    return dependencies
+
+
+def _parse_pipfile_lock(file: FileSnapshot) -> list[Dependency]:
+    try:
+        data = json.loads(file.text)
+    except json.JSONDecodeError:
+        return []
+    dependencies: list[Dependency] = []
+    for section, scope_flag in (("default", None), ("develop", "dependency_scope:devDependencies")):
+        raw_deps = data.get(section)
+        if not isinstance(raw_deps, dict):
+            continue
+        for name, metadata in raw_deps.items():
+            if not isinstance(metadata, dict):
+                continue
+            version = str(metadata.get("version")).removeprefix("==") if metadata.get("version") else None
+            flags = [scope_flag] if scope_flag else []
+            hashes = metadata.get("hashes")
+            if isinstance(hashes, list) and hashes:
+                flags.append("integrity:pipfile-lock-hashes")
+            line = find_line(file.text, f'"{name}"')
+            dependencies.append(
+                Dependency(
+                    name=name,
+                    version=version,
+                    ecosystem="python",
+                    relationship="transitive",
+                    source_type="lockfile",
+                    source_file=file.path,
+                    source_line=line,
+                    flags=flags,
+                    evidence=[
+                        LicenseEvidence(
+                            source="lockfile",
+                            file=file.path,
+                            line=line,
+                            text=f"{name}@{version}",
+                            detected_license=None,
+                            confidence="none",
+                        )
+                    ],
+                )
+            )
+    return dependencies
+
+
+def _parse_uv_lock(file: FileSnapshot) -> list[Dependency]:
+    dependencies: list[Dependency] = []
+    blocks = re.split(r"\n(?=\[\[package\]\])", file.text)
+    for block in blocks:
+        if "[[package]]" not in block:
+            continue
+        name = _toml_value(block, "name")
+        if not name:
+            continue
+        version = _toml_value(block, "version")
+        line = find_line(file.text, f'name = "{name}"')
+        dependencies.append(
+            Dependency(
+                name=name,
+                version=version,
+                ecosystem="python",
+                relationship="transitive",
+                source_type="lockfile",
+                source_file=file.path,
+                source_line=line,
+                evidence=[
+                    LicenseEvidence(
+                        source="lockfile",
+                        file=file.path,
+                        line=line,
+                        text=f"{name}@{version}",
+                        detected_license=None,
+                        confidence="none",
                     )
                 ],
             )

@@ -95,7 +95,7 @@ export default function IssueCodeReview({ scan, onGoToScanner }) {
   const selectedLine = selectedIssue?.line;
 
   useEffect(() => {
-    if (isPlaceholder || !repo || !selectedPath || fileCache[selectedPath]) return;
+    if (!repo || !selectedPath || fileCache[selectedPath]) return;
     setFileCache((prev) => ({
       ...prev,
       [selectedPath]: { state: "loading", text: "", error: "" },
@@ -121,7 +121,7 @@ export default function IssueCodeReview({ scan, onGoToScanner }) {
           [selectedPath]: { state: "error", text: "", error: err.message || "Could not load file" },
         }));
       });
-  }, [branch, fileCache, isPlaceholder, repo, selectedPath]);
+  }, [branch, fileCache, repo, selectedPath]);
 
   if (!scan) {
     return <EmptyState onGoToScanner={onGoToScanner} />;
@@ -151,7 +151,7 @@ export default function IssueCodeReview({ scan, onGoToScanner }) {
           <h1 className="text-[30px] font-bold tracking-tight text-text-primary">Issues by file and line</h1>
           <p className="mt-1 text-[14px] leading-relaxed text-text-secondary">
             {issues.length} findings from the latest scan. {mappedCount} are mapped to a source location.
-            {isPlaceholder && " Demo findings are illustrative, so source files are shown from returned evidence only."}
+            {isPlaceholder && " Demo findings are illustrative; source files are loaded from the selected repository when available."}
           </p>
         </div>
         <button
@@ -222,18 +222,26 @@ export default function IssueCodeReview({ scan, onGoToScanner }) {
               <div className="px-3 py-10 text-center text-[13px] text-text-muted">No findings match these filters.</div>
             ) : (
               <div className="space-y-4">
-                {fileGroups.map((group) => (
-                  <FileIssueGroup
-                    key={group.path}
-                    group={group}
-                    selectedId={selectedIssue?.id}
-                    onSelect={setSelectedId}
-                  />
-                ))}
+                {fileGroups.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="px-2 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                      Files · {fileGroups.length}
+                    </div>
+                    {fileGroups.map((group) => (
+                      <FileIssueGroup
+                        key={group.path}
+                        group={group}
+                        selectedPath={selectedPath}
+                        selectedId={selectedIssue?.id}
+                        onSelect={setSelectedId}
+                      />
+                    ))}
+                  </div>
+                )}
                 {unmappedIssues.length > 0 && (
                   <div className="space-y-2">
                     <div className="px-2 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
-                      Unmapped · {unmappedIssues.length}
+                      Unmapped findings · {unmappedIssues.length}
                     </div>
                     {unmappedIssues.map((issue) => (
                       <IssueListItem
@@ -255,7 +263,6 @@ export default function IssueCodeReview({ scan, onGoToScanner }) {
           file={selectedFile}
           repo={repo}
           branch={branch}
-          isPlaceholder={isPlaceholder}
           fileIssues={selectedFileIssues}
           targetLine={selectedLine}
           selectedIssueId={selectedIssue?.id}
@@ -286,29 +293,43 @@ function EmptyState({ onGoToScanner }) {
   );
 }
 
-function FileIssueGroup({ group, selectedId, onSelect }) {
+function FileIssueGroup({ group, selectedPath, selectedId, onSelect }) {
   const topSeverity = group.issues[0]?.severity ?? "info";
   const cfg = SEV[topSeverity] ?? SEV.info;
+  const selected = group.path === selectedPath;
   return (
-    <section className="space-y-2">
-      <div className="rounded-xl border border-border bg-chip-alt px-3 py-2">
-        <div className="flex items-start gap-2">
-          <FileCode2 className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${cfg.color}`} strokeWidth={2} />
-          <div className="min-w-0 flex-1">
+    <section className={`overflow-hidden rounded-xl border ${selected ? `${cfg.border} bg-white` : "border-border bg-card"}`}>
+      <button
+        onClick={() => onSelect(group.issues[0].id)}
+        className={`flex w-full items-start gap-2 px-3 py-3 text-left transition-colors ${
+          selected ? cfg.bg : "bg-chip-alt hover:bg-white"
+        }`}
+      >
+        <FileCode2 className={`mt-0.5 h-4 w-4 shrink-0 ${cfg.color}`} strokeWidth={2} />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
             <div className="truncate font-mono text-[12px] font-semibold text-text-primary">{group.path}</div>
-            <div className="mt-0.5 text-[11px] text-text-muted">
-              {group.issues.length} comment{group.issues.length === 1 ? "" : "s"} on {group.lineCount} line{group.lineCount === 1 ? "" : "s"}
-            </div>
+            <span className={`shrink-0 rounded-full border ${cfg.border} bg-white/70 px-2 py-0.5 text-[10px] font-semibold ${cfg.color}`}>
+              {group.issues.length}
+            </span>
+          </div>
+          <div className="mt-0.5 text-[11px] text-text-muted">
+            {group.lineCount} affected line{group.lineCount === 1 ? "" : "s"}
           </div>
         </div>
-      </div>
-      <div className="space-y-1.5">
+      </button>
+      <div className="space-y-1 border-t border-border/70 bg-white p-2 pl-5">
+        <div className="mb-1 flex items-center gap-2 px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">
+          <span className="h-px w-4 bg-border" />
+          Issues
+        </div>
         {group.issues.map((issue) => (
           <IssueListItem
             key={issue.id}
             issue={issue}
             selected={issue.id === selectedId}
             onSelect={() => onSelect(issue.id)}
+            nested
           />
         ))}
       </div>
@@ -316,22 +337,33 @@ function FileIssueGroup({ group, selectedId, onSelect }) {
   );
 }
 
-function IssueListItem({ issue, selected, onSelect }) {
+function IssueListItem({ issue, selected, onSelect, nested = false }) {
   const cfg = SEV[issue.severity] ?? SEV.info;
   return (
     <button
       onClick={onSelect}
-      className={`w-full rounded-xl border px-3 py-3 text-left transition-all ${
-        selected ? `${cfg.border} ${cfg.bg}` : "border-transparent hover:border-border hover:bg-chip-alt"
-      }`}
+      className={`w-full rounded-lg border text-left transition-all ${
+        nested
+          ? selected ? `${cfg.border} ${cfg.bg}` : "border-transparent hover:border-border hover:bg-chip-alt"
+          : selected ? `${cfg.border} ${cfg.bg}` : "border-transparent hover:border-border hover:bg-chip-alt"
+      } ${nested ? "px-2.5 py-2" : "px-3 py-3"}`}
     >
       <div className="flex items-start gap-2">
         <cfg.Icon className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${cfg.color}`} strokeWidth={2.2} />
         <div className="min-w-0 flex-1">
-          <div className="line-clamp-2 text-[13px] font-semibold leading-snug text-text-primary">{issue.title}</div>
-          <div className="mt-1 truncate font-mono text-[11px] text-text-muted">
-            {issue.path ? `${issue.path}${issue.line ? `:${issue.line}` : ""}` : "No source location"}
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <div className="line-clamp-2 text-[12px] font-semibold leading-snug text-text-primary">{issue.title}</div>
+            {issue.line && (
+              <span className="shrink-0 rounded-md border border-border bg-white px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
+                L{issue.line}
+              </span>
+            )}
           </div>
+          {!nested && (
+            <div className="mt-1 truncate font-mono text-[11px] text-text-muted">
+              {issue.path ? `${issue.path}${issue.line ? `:${issue.line}` : ""}` : "No source location"}
+            </div>
+          )}
           <div className="mt-1 truncate text-[11px] text-text-muted">{issue.scannerId}</div>
         </div>
       </div>
@@ -339,7 +371,7 @@ function IssueListItem({ issue, selected, onSelect }) {
   );
 }
 
-function CodePane({ issue, file, repo, branch, isPlaceholder, fileIssues, targetLine, selectedIssueId, onSelectIssue }) {
+function CodePane({ issue, file, repo, branch, fileIssues, targetLine, selectedIssueId, onSelectIssue }) {
   if (!issue) {
     return (
       <section className="flex items-center justify-center rounded-2xl border border-border bg-card shadow-card">
@@ -355,8 +387,7 @@ function CodePane({ issue, file, repo, branch, isPlaceholder, fileIssues, target
         .join("/")}#L${issue.line || 1}`
     : null;
   const visibleIssues = fileIssues?.length ? fileIssues : [issue];
-  const syntheticRows = buildSyntheticRows(visibleIssues, issue.path);
-  const hasSyntheticRows = syntheticRows.length > 0;
+  const issueLineCount = new Set(visibleIssues.map((item) => item.line).filter(Boolean)).size;
 
   return (
     <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
@@ -368,8 +399,11 @@ function CodePane({ issue, file, repo, branch, isPlaceholder, fileIssues, target
             {issue.line && <span className="font-mono">:{issue.line}</span>}
           </div>
           <h2 className="mt-1 line-clamp-2 text-[16px] font-bold text-text-primary">
-            {visibleIssues.length} inline review comment{visibleIssues.length === 1 ? "" : "s"}
+            Full source file
           </h2>
+          <p className="mt-1 text-[12px] text-text-muted">
+            {visibleIssues.length} review comment{visibleIssues.length === 1 ? "" : "s"} across {issueLineCount || visibleIssues.length} highlighted line{(issueLineCount || visibleIssues.length) === 1 ? "" : "s"}.
+          </p>
         </div>
         {githubUrl && (
           <a
@@ -384,33 +418,15 @@ function CodePane({ issue, file, repo, branch, isPlaceholder, fileIssues, target
         )}
       </div>
 
-      {isPlaceholder && hasSyntheticRows ? (
-        <CodeContext
-          rows={syntheticRows}
-          targetLine={targetLine}
-          issues={visibleIssues}
-          selectedIssueId={selectedIssueId}
-          onSelectIssue={onSelectIssue}
-          note="Demo scan: showing returned source evidence as a review diff."
-        />
-      ) : !issue.path || !issue.line ? (
+      {!issue.path || !issue.line ? (
         <EvidenceOnly issue={issue} message="This finding does not include a file and line location." />
       ) : file?.state === "loading" || !file ? (
         <div className="flex min-h-[420px] items-center justify-center gap-2 text-[13px] text-text-muted">
           <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2.2} />
           Loading source file from GitHub...
         </div>
-      ) : file.state === "error" && hasSyntheticRows ? (
-        <CodeContext
-          rows={syntheticRows}
-          targetLine={targetLine}
-          issues={visibleIssues}
-          selectedIssueId={selectedIssueId}
-          onSelectIssue={onSelectIssue}
-          note={`GitHub source could not be loaded, so this view is using scan evidence. ${file.error || ""}`.trim()}
-        />
       ) : file.state === "error" ? (
-        <EvidenceOnly issue={issue} message={`File could not be loaded from GitHub. ${file.error || ""}`.trim()} />
+        <EvidenceOnly issue={issue} message={`The full source file could not be loaded from GitHub. ${file.error || ""}`.trim()} />
       ) : (
         <CodeContext
           text={file.text}
@@ -424,9 +440,9 @@ function CodePane({ issue, file, repo, branch, isPlaceholder, fileIssues, target
   );
 }
 
-function CodeContext({ text, rows: providedRows, targetLine, issues, selectedIssueId, onSelectIssue, note }) {
+function CodeContext({ text, targetLine, issues, selectedIssueId, onSelectIssue }) {
   const containerRef = useRef(null);
-  const rows = providedRows ?? (text || "").split(/\r?\n/).map((line, index) => ({
+  const rows = (text || "").split(/\r?\n/).map((line, index) => ({
     lineNumber: index + 1,
     text: line,
   }));
@@ -450,7 +466,7 @@ function CodeContext({ text, rows: providedRows, targetLine, issues, selectedIss
   useEffect(() => {
     const target = containerRef.current?.querySelector("[data-target-line='true']");
     target?.scrollIntoView({ block: "center" });
-  }, [scrollLine, text, providedRows]);
+  }, [scrollLine, text]);
 
   if (rows.length === 0) {
     return (
@@ -462,11 +478,6 @@ function CodeContext({ text, rows: providedRows, targetLine, issues, selectedIss
 
   return (
     <div ref={containerRef} className="max-h-[650px] overflow-auto bg-white">
-      {note && (
-        <div className="border-b border-border bg-yellow-50 px-4 py-2 text-[12px] text-text-secondary">
-          {note}
-        </div>
-      )}
       <table className="w-full border-collapse font-mono text-[12px]">
         <tbody>
           {rows.map((row) => {
@@ -477,13 +488,13 @@ function CodeContext({ text, rows: providedRows, targetLine, issues, selectedIss
             return (
               <Fragment key={lineNumber}>
                 <tr
-                  className={hasIssue ? "bg-yellow-50" : active ? "bg-slate-50" : "bg-white"}
+                  className={hasIssue ? "bg-yellow-50" : "bg-white"}
                   data-target-line={active ? "true" : undefined}
                 >
-                  <td className={`w-14 select-none border-r border-border px-3 py-1.5 text-right ${hasIssue ? "bg-yellow-100 text-yellow-800" : "bg-chip-alt text-text-muted"}`}>
+                  <td className={`w-14 select-none border-r border-border px-3 py-1.5 text-right ${hasIssue ? "bg-yellow-100 font-semibold text-yellow-800" : "bg-chip-alt text-text-muted"}`}>
                     {lineNumber}
                   </td>
-                  <td className={`whitespace-pre px-4 py-1.5 ${hasIssue || active ? "text-text-primary" : "text-text-secondary"}`}>
+                  <td className={`whitespace-pre border-l-2 px-4 py-1.5 ${hasIssue ? "border-yellow-400 text-text-primary" : "border-transparent text-text-secondary"}`}>
                     {row.text || " "}
                   </td>
                 </tr>
@@ -556,17 +567,12 @@ function EvidenceOnly({ issue, message }) {
       <IssueCallout issue={issue} />
       {issue.evidence.length > 0 && (
         <div className="space-y-2">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">Evidence</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">Evidence locations</div>
           {issue.evidence.map((item, index) => (
             <div key={index} className="rounded-xl border border-border bg-white px-4 py-3">
               <div className="font-mono text-[11px] text-text-muted">
                 {item.path || "No file"}{item.line ? `:${item.line}` : ""}
               </div>
-              {item.excerpt && (
-                <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-text-primary">
-                  {item.excerpt}
-                </pre>
-              )}
             </div>
           ))}
         </div>
@@ -623,32 +629,6 @@ function compareIssues(a, b) {
   if (severityDelta !== 0) return severityDelta;
   if ((a.path || "") !== (b.path || "")) return (a.path || "").localeCompare(b.path || "");
   return (a.line || 0) - (b.line || 0);
-}
-
-function buildSyntheticRows(issues, selectedPath) {
-  const rows = new Map();
-
-  issues.forEach((issue) => {
-    const evidence = issue.evidence.length > 0 ? issue.evidence : [{ path: issue.path, line: issue.line, excerpt: "" }];
-    evidence
-      .filter((item) => !selectedPath || !item.path || item.path === selectedPath)
-      .forEach((item) => {
-        const line = Number(item.line || issue.line || 1);
-        const excerptLines = String(item.excerpt || "").split(/\r?\n/).filter((text) => text.length > 0);
-        if (excerptLines.length === 0) {
-          rows.set(line, rows.get(line) || `// ${issue.title}`);
-          return;
-        }
-        excerptLines.forEach((text, index) => {
-          const lineNumber = line + index;
-          rows.set(lineNumber, rows.get(lineNumber) || text);
-        });
-      });
-  });
-
-  return Array.from(rows.entries())
-    .sort(([a], [b]) => a - b)
-    .map(([lineNumber, text]) => ({ lineNumber, text }));
 }
 
 function normalizeEvidence(evidence) {

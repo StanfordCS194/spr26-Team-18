@@ -20,6 +20,10 @@ def parse(file: FileSnapshot) -> list[Dependency]:
         return _parse_package_json(file)
     if filename == "package-lock.json":
         return _parse_package_lock(file)
+    if filename == "yarn.lock":
+        return _parse_yarn_lock(file)
+    if filename == "pnpm-lock.yaml":
+        return _parse_pnpm_lock(file)
     return []
 
 
@@ -31,6 +35,8 @@ def _parse_package_json(file: FileSnapshot) -> list[Dependency]:
 
     if file.path == "package.json" and data.get("name"):
         license_value = data.get("license")
+        flags = ["local_project"]
+        flags.extend(_package_role_flags(file, data))
         dependencies.append(
             Dependency(
                 name=str(data.get("name")),
@@ -41,7 +47,7 @@ def _parse_package_json(file: FileSnapshot) -> list[Dependency]:
                 source_file=file.path,
                 source_line=find_line(file.text, '"name"'),
                 declared_license=str(license_value) if license_value else None,
-                flags=["local_project"],
+                flags=flags,
                 evidence=[
                     LicenseEvidence(
                         source="local_manifest",
@@ -60,6 +66,8 @@ def _parse_package_json(file: FileSnapshot) -> list[Dependency]:
         if not isinstance(raw_deps, dict):
             continue
         for name, version_spec in raw_deps.items():
+            flags = [f"dependency_scope:{section}"]
+            flags.extend(_package_role_flags(file, data))
             dependencies.append(
                 Dependency(
                     name=str(name),
@@ -69,7 +77,7 @@ def _parse_package_json(file: FileSnapshot) -> list[Dependency]:
                     source_type="manifest",
                     source_file=file.path,
                     source_line=find_line(file.text, f'"{name}"'),
-                    flags=[f"dependency_scope:{section}"],
+                    flags=flags,
                     evidence=[
                         LicenseEvidence(
                             source="local_manifest",
@@ -110,6 +118,19 @@ def _parse_package_json(file: FileSnapshot) -> list[Dependency]:
                 )
             )
     return dependencies
+
+
+def _package_role_flags(file: FileSnapshot, data: dict[str, Any]) -> list[str]:
+    if file.path != "package.json":
+        return []
+    flags: list[str] = []
+    if data.get("private") is True:
+        flags.append("package_role:app")
+    elif data.get("name"):
+        flags.append("package_role:library")
+    if data.get("workspaces"):
+        flags.append("package_workspace_root")
+    return flags
 
 
 def _parse_package_lock(file: FileSnapshot) -> list[Dependency]:
@@ -196,6 +217,114 @@ def _parse_package_lock(file: FileSnapshot) -> list[Dependency]:
     return dependencies
 
 
+def _parse_yarn_lock(file: FileSnapshot) -> list[Dependency]:
+    dependencies: list[Dependency] = []
+    current_specs: list[str] = []
+    current_block: list[str] = []
+    current_line = 1
+
+    def flush() -> None:
+        if not current_specs:
+            return
+        block = "\n".join(current_block)
+        version = _yaml_quoted_value(block, "version")
+        resolved = _yaml_quoted_value(block, "resolved")
+        integrity = _yaml_quoted_value(block, "integrity")
+        for spec in current_specs:
+            name = _name_from_yarn_spec(spec)
+            if not name:
+                continue
+            flags: list[str] = []
+            if resolved:
+                flags.append(f"artifact_url:{resolved}")
+            if integrity:
+                flags.append(f"integrity:{integrity}")
+            dependencies.append(
+                Dependency(
+                    name=name,
+                    version=version,
+                    ecosystem="npm",
+                    relationship="transitive",
+                    source_type="lockfile",
+                    source_file=file.path,
+                    source_line=current_line,
+                    flags=flags,
+                    evidence=[
+                        LicenseEvidence(
+                            source="lockfile",
+                            file=file.path,
+                            line=current_line,
+                            text=f"{name}@{version}",
+                            detected_license=None,
+                            confidence="none",
+                        )
+                    ],
+                )
+            )
+
+    for line_number, line in enumerate(file.text.splitlines(), start=1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        if not line.startswith((" ", "\t")) and line.rstrip().endswith(":"):
+            flush()
+            current_line = line_number
+            key = line.rstrip()[:-1].strip().strip('"').strip("'")
+            current_specs = [part.strip().strip('"').strip("'") for part in key.split(",")]
+            current_block = []
+            continue
+        if current_specs:
+            current_block.append(line)
+    flush()
+    return dependencies
+
+
+def _parse_pnpm_lock(file: FileSnapshot) -> list[Dependency]:
+    dependencies: list[Dependency] = []
+    lines = file.text.splitlines()
+    for line_number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped.endswith(":") or stripped.startswith(("-", "specifier:", "version:")):
+            continue
+        if not (stripped.startswith("/") or "@" in stripped):
+            continue
+        key = stripped[:-1].strip("'\"")
+        parsed = _name_version_from_pnpm_key(key)
+        if parsed is None:
+            continue
+        name, version = parsed
+        block = "\n".join(lines[line_number : min(len(lines), line_number + 12)])
+        flags: list[str] = []
+        resolution = _yaml_quoted_value(block, "tarball")
+        integrity = _yaml_quoted_value(block, "integrity")
+        if resolution:
+            flags.append(f"artifact_url:{resolution}")
+        if integrity:
+            flags.append(f"integrity:{integrity}")
+        dependencies.append(
+            Dependency(
+                name=name,
+                version=version,
+                ecosystem="npm",
+                relationship="transitive",
+                source_type="lockfile",
+                source_file=file.path,
+                source_line=line_number,
+                flags=flags,
+                evidence=[
+                    LicenseEvidence(
+                        source="lockfile",
+                        file=file.path,
+                        line=line_number,
+                        text=f"{name}@{version}",
+                        detected_license=None,
+                        confidence="none",
+                    )
+                ],
+            )
+        )
+    return dependencies
+
+
 def _load_json(text: str) -> Any:
     try:
         return json.loads(text)
@@ -213,3 +342,45 @@ def _lockfile_flags(metadata: dict[str, Any], package_path: str) -> list[str]:
     if any(part in lower_path for part in ("test", "tests", "fixture", "fixtures", "devtools", "tooling")):
         flags.append("dependency_scope:lockfile_dev")
     return flags
+
+
+def _yaml_quoted_value(block: str, key: str) -> str | None:
+    for line in block.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(f"{key}:"):
+            continue
+        value = stripped.split(":", maxsplit=1)[1].strip()
+        return value.strip('"').strip("'") or None
+    return None
+
+
+def _name_from_yarn_spec(spec: str) -> str | None:
+    spec = spec.strip()
+    if not spec:
+        return None
+    if spec.startswith("@"):
+        parts = spec.split("@")
+        if len(parts) >= 3:
+            return "@" + parts[1]
+        return spec
+    return spec.split("@", maxsplit=1)[0] or None
+
+
+def _name_version_from_pnpm_key(key: str) -> tuple[str, str | None] | None:
+    cleaned = key.split("(", maxsplit=1)[0].strip("/")
+    if not cleaned:
+        return None
+    if cleaned.startswith("@"):
+        parts = cleaned.split("/")
+        if len(parts) < 2:
+            return None
+        scope = parts[0]
+        name_and_version = parts[1]
+        if "@" not in name_and_version:
+            return None
+        name, version = name_and_version.rsplit("@", maxsplit=1)
+        return f"{scope}/{name}", version or None
+    if "@" not in cleaned:
+        return None
+    name, version = cleaned.rsplit("@", maxsplit=1)
+    return name, version or None

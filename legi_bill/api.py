@@ -2,19 +2,19 @@ import json as _json
 import sys
 from io import BytesIO, StringIO
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
 from app.ranking import rank_bills
-from .config import OPENAI_MODEL, load_config
+from .config import load_config
 from .grader import grade_company
 from .legal_intelligence import detect_industry, calculate_savings
+from .llm import LLMConfigError, LLMProviderCapabilityError, get_chat_client
 from .storage import init_db, get_all_bills, get_bill_with_summary_and_questions
 
 app = FastAPI(title="Legi-Bill API")
@@ -273,6 +273,8 @@ def _bill_details_payload(bill_number: str) -> dict:
 def match_chat(
     messages: str = Form(...),
     file: Optional[UploadFile] = File(None),
+    llm_provider: Optional[str] = Form(None),
+    llm_model: Optional[str] = Form(None),
 ):
     try:
         history = _json.loads(messages)
@@ -297,40 +299,38 @@ def match_chat(
                 }
                 break
 
-    cfg = load_config()
-    api_key = cfg.get("openai_api_key", "")
-    if not api_key or api_key.startswith("stub"):
-        raise HTTPException(
-            503,
-            "OPENAI_API_KEY is not configured. Set a real key in .env to enable chat.",
-        )
-
-    client = OpenAI(api_key=api_key)
+    try:
+        client = get_chat_client(provider=llm_provider, model=llm_model)
+    except LLMConfigError as e:
+        raise HTTPException(503, str(e)) from e
     full = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}, *history]
     matches: Optional[list] = None
 
     for _ in range(3):
         try:
-            response = client.chat.completions.create(
-                model=OPENAI_MODEL,
+            response = client.complete(
                 messages=full,
                 tools=CHAT_TOOLS,
                 tool_choice="auto",
             )
+        except LLMProviderCapabilityError as e:
+            raise HTTPException(400, str(e)) from e
         except Exception as e:
-            raise HTTPException(502, f"OpenAI API error: {e}")
+            raise HTTPException(502, f"LLM API error: {e}")
 
-        msg = response.choices[0].message
+        tool_calls = response.tool_calls or []
 
-        if msg.tool_calls:
+        if tool_calls:
             full.append({
                 "role": "assistant",
-                "content": msg.content or "",
-                "tool_calls": [tc.model_dump() for tc in msg.tool_calls],
+                "content": response.content or "",
+                "tool_calls": tool_calls,
             })
-            for tc in msg.tool_calls:
-                args = _json.loads(tc.function.arguments or "{}")
-                if tc.function.name == "run_match":
+            for tc in tool_calls:
+                function = tc.get("function", {}) if isinstance(tc, dict) else {}
+                args = _json.loads(function.get("arguments") or "{}")
+                function_name = function.get("name")
+                if function_name == "run_match":
                     matches = _rank_for_description(args.get("description", ""))
                     tool_result = {
                         "matches_returned": len(matches),
@@ -339,18 +339,18 @@ def match_chat(
                             for m in matches[:5]
                         ],
                     }
-                elif tc.function.name == "get_bill_details":
+                elif function_name == "get_bill_details":
                     tool_result = _bill_details_payload(args.get("bill_number", ""))
                 else:
-                    tool_result = {"error": f"unknown tool {tc.function.name}"}
+                    tool_result = {"error": f"unknown tool {function_name}"}
                 full.append({
                     "role": "tool",
-                    "tool_call_id": tc.id,
+                    "tool_call_id": tc.get("id", "") if isinstance(tc, dict) else "",
                     "content": _json.dumps(tool_result),
                 })
             continue
 
-        return {"message": msg.content or "", "matches": matches}
+        return {"message": response.content or "", "matches": matches}
 
     raise HTTPException(500, "Chat tool-call loop did not converge")
 
@@ -359,6 +359,8 @@ def match_chat(
 def grade(
     company_text: Optional[str] = Form(None),
     company_name: Optional[str] = Form(None),
+    llm_provider: Optional[str] = Form(None),
+    llm_model: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
 ):
     """Score a company across the 5 regulatory exposure axes with evidence.
@@ -384,14 +386,6 @@ def grade(
             detail="Provide a non-empty file or company_text.",
         )
 
-    cfg = load_config()
-    api_key = cfg.get("openai_api_key", "")
-    if not api_key or api_key.startswith("stub"):
-        raise HTTPException(
-            503,
-            "OPENAI_API_KEY is not configured. Set a real key in .env to enable grading.",
-        )
-
     # Use the same enrichment pattern as /api/match — bills + their summary text
     # if available — so the ranker has the richest possible corpus to match against.
     conn = get_conn()
@@ -405,8 +399,10 @@ def grade(
     name = company_name or (fname.rsplit(".", 1)[0] if fname else None)
 
     try:
-        client = OpenAI(api_key=api_key)
+        client = get_chat_client(provider=llm_provider, model=llm_model)
         result = grade_company(client, enriched, text, company_name=name)
+    except LLMConfigError as e:
+        raise HTTPException(503, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
@@ -447,11 +443,14 @@ class StartupSummaryRequest(BaseModel):
     composite: int
     axes: dict
     top_actions: list
+    llm_provider: str | None = None
+    llm_model: str | None = None
 
 
 class LicenseScanOptions(BaseModel):
     deterministic_only: bool = False
     llm_provider: str | None = None
+    llm_model: str | None = None
     batch_timeout_hours: float = 24
     poll_interval_seconds: int = 60
     registry_metadata: bool = False
@@ -494,6 +493,7 @@ def startup_license_scan(req: LicenseScanRequest):
     scanner = LicenseRiskScanner(
         deterministic_only=req.options.deterministic_only,
         provider_name=req.options.llm_provider,
+        model_name=req.options.llm_model,
         batch_timeout_seconds=int(req.options.batch_timeout_hours * 60 * 60),
         poll_interval_seconds=req.options.poll_interval_seconds,
         enable_registry_metadata=req.options.registry_metadata,
@@ -516,11 +516,6 @@ def startup_license_scan(req: LicenseScanRequest):
 @app.post("/api/startup/summary")
 def startup_summary(req: StartupSummaryRequest):
     """Synthesize a short verdict over the deterministic startup-health grade."""
-    cfg = load_config()
-    api_key = cfg.get("openai_api_key", "")
-    if not api_key or api_key.startswith("stub"):
-        raise HTTPException(503, "OPENAI_API_KEY not configured.")
-
     lines = [
         f"Startup: {req.name}",
         f"Composite grade: {req.grade} ({req.composite}/100)",
@@ -551,9 +546,8 @@ def startup_summary(req: StartupSummaryRequest):
     )
 
     try:
-        client = OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
-            model=cfg.get("openai_model", OPENAI_MODEL) or "gpt-4o-mini",
+        client = _get_llm_client(provider=req.llm_provider, model=req.llm_model)
+        resp = client.complete(
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": "\n".join(lines)},
@@ -561,11 +555,497 @@ def startup_summary(req: StartupSummaryRequest):
             temperature=0.4,
             max_tokens=180,
         )
-        verdict = (resp.choices[0].message.content or "").strip()
+        verdict = (resp.content or "").strip()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(502, f"Summary generation failed: {e}")
 
-    return {"verdict": verdict, "model": cfg.get("openai_model", OPENAI_MODEL)}
+    return {"verdict": verdict, "model": resp.model, "provider": resp.provider}
+
+
+class StartupCustomRulesRequest(BaseModel):
+    questionnaire: dict  # { stage, customers, sensitive_data, regulated_industry, gtm, ... }
+    prd_text: Optional[str] = None
+    github_summary: Optional[dict] = None  # passed through so rules can reference repo facts
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+
+
+class StartupCustomGradeRequest(BaseModel):
+    rules: list  # [{id, title, weight, what_to_check, fix}]
+    prd_text: Optional[str] = None
+    github_summary: Optional[dict] = None
+    spreadsheet_summary: Optional[dict] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+
+
+def _get_llm_client(provider: str | None = None, model: str | None = None):
+    try:
+        return get_chat_client(provider=provider, model=model)
+    except LLMConfigError as e:
+        raise HTTPException(503, str(e)) from e
+
+
+@app.post("/api/startup/custom-rules")
+def startup_custom_rules(req: StartupCustomRulesRequest):
+    """LLM writes a tailored ruleset for this specific startup.
+
+    Inputs: a short questionnaire + (optionally) the PRD. Output: a JSON list
+    of 5-8 rules with id, title, weight, what_to_check (criteria the grader will
+    use), and a fix. These rules form the "custom" axis in the rubric.
+    """
+    q = req.questionnaire or {}
+    lines = ["Founder questionnaire:"]
+    for k, v in q.items():
+        if v:
+            lines.append(f"  - {k}: {v}")
+    if req.prd_text:
+        excerpt = req.prd_text[:4000]
+        lines += ["", "PRD excerpt:", excerpt]
+    if req.github_summary:
+        gh = req.github_summary
+        lines += [
+            "",
+            "Repo facts:",
+            f"  - name: {gh.get('fullName')}",
+            f"  - language: {gh.get('language')}",
+            f"  - license: {gh.get('license')}",
+            f"  - files: {', '.join((gh.get('filenames') or [])[:20])}",
+        ]
+    user_msg = "\n".join(lines)
+
+    system = (
+        "You are a startup diligence expert. Given a founder's questionnaire and PRD, "
+        "write a CUSTOM ruleset of 5-8 specific, checkable rules that matter for THIS "
+        "product (not generic best practices already covered by a stock rubric: license, "
+        "tests, README, runway, GDPR/CCPA/COPPA, PRD completeness). Focus on what's unique "
+        "to their stage, customer, industry, data, and GTM. Each rule must be verifiable "
+        "from the PRD text or repo facts a grader will be shown. "
+        "Return ONLY a JSON object: "
+        '{"rules": [{"id": "snake_case_id", "title": "short rule title", '
+        '"weight": 5-20, "what_to_check": "explicit criteria the grader will use", '
+        '"fix": "one-line concrete remediation"}]}. No prose, no markdown fences.'
+    )
+
+    try:
+        client = _get_llm_client(provider=req.llm_provider, model=req.llm_model)
+        resp = client.complete(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.3,
+            max_tokens=900,
+            response_format={"type": "json_object"},
+        )
+        raw = (resp.content or "").strip()
+        parsed = _json.loads(raw)
+        rules = parsed.get("rules") or []
+        if not isinstance(rules, list) or not rules:
+            raise ValueError("LLM returned no rules")
+        cleaned = []
+        for i, r in enumerate(rules[:8]):
+            cleaned.append({
+                "id": str(r.get("id") or f"custom_{i}")[:64],
+                "title": str(r.get("title") or "")[:140],
+                "weight": max(1, min(25, int(r.get("weight") or 8))),
+                "what_to_check": str(r.get("what_to_check") or "")[:600],
+                "fix": str(r.get("fix") or "")[:240],
+            })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Rule generation failed: {e}")
+
+    return {"rules": cleaned, "model": resp.model, "provider": resp.provider}
+
+
+@app.post("/api/startup/custom-grade")
+def startup_custom_grade(req: StartupCustomGradeRequest):
+    """LLM grades the repo + PRD against the custom rules. Returns pass/fail
+    per rule with evidence ('observed') the user will see in the drilldown.
+    """
+    if not req.rules:
+        raise HTTPException(400, "No rules to grade against.")
+
+    lines = ["Rules to evaluate:"]
+    for r in req.rules:
+        lines.append(
+            f"  - id={r.get('id')} | title={r.get('title')} | check: {r.get('what_to_check')}"
+        )
+
+    lines.append("")
+    lines.append("Evidence available:")
+    if req.prd_text:
+        lines += ["PRD:", req.prd_text[:4000]]
+    if req.github_summary:
+        gh = req.github_summary
+        lines += [
+            "",
+            "Repo:",
+            f"  name={gh.get('fullName')} language={gh.get('language')} license={gh.get('license')}",
+            f"  files: {', '.join((gh.get('filenames') or [])[:30])}",
+            f"  hasCI={gh.get('hasCI')} hasTests={gh.get('hasTests')} hasEnvFile={gh.get('hasEnvFile')}",
+            f"  contributors={gh.get('contributorCount')} daysSincePush={gh.get('daysSincePush')}",
+            f"  readme excerpt: {(gh.get('readmeText') or '')[:800]}",
+        ]
+    if req.spreadsheet_summary:
+        s = req.spreadsheet_summary
+        lines += [
+            "",
+            "Finance:",
+            f"  rows={s.get('rowCount')} runway_months={s.get('runway')} "
+            f"monthlyRevenue={s.get('monthlyRevenue')} hasCategories={s.get('hasCategories')}",
+        ]
+
+    user_msg = "\n".join(lines)
+
+    system = (
+        "You are evaluating a startup against a CUSTOM ruleset. For each rule, decide "
+        "passed=true/false STRICTLY from the evidence shown. If evidence is missing, "
+        "passed=false and say so in observed. Never invent facts. "
+        "Return ONLY JSON: "
+        '{"results": [{"id": "<rule id>", "passed": bool, '
+        '"observed": "<1 short sentence of evidence>"}]}. '
+        "Include every rule id exactly once. No markdown fences."
+    )
+
+    try:
+        client = _get_llm_client(provider=req.llm_provider, model=req.llm_model)
+        resp = client.complete(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.1,
+            max_tokens=900,
+            response_format={"type": "json_object"},
+        )
+        raw = (resp.content or "").strip()
+        parsed = _json.loads(raw)
+        results = parsed.get("results") or []
+        by_id = {str(r.get("id")): r for r in results if isinstance(r, dict)}
+        cleaned = []
+        for r in req.rules:
+            rid = str(r.get("id"))
+            hit = by_id.get(rid) or {}
+            cleaned.append({
+                "id": rid,
+                "title": r.get("title"),
+                "weight": r.get("weight"),
+                "passed": bool(hit.get("passed", False)),
+                "observed": str(hit.get("observed") or "no evidence found")[:240],
+                "fix": r.get("fix") or "",
+            })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Custom grading failed: {e}")
+
+    return {"results": cleaned, "model": resp.model, "provider": resp.provider}
+
+
+_COMPLIANCE_STAGE_REQUIREMENTS: dict[str, list[str]] = {
+    "pre_seed": [
+        "IRC §83(b) election — founders must file within 30 days of receiving restricted stock",
+        "Form 1099-NEC — required for any contractor paid $600+ in the calendar year",
+        "EIN (Form SS-4) — confirm employer identification number is established",
+        "IRC §1202 QSBS — verify aggregate gross assets ≤ $50M at each stock issuance",
+        "SAFE / convertible note — ASC 480/815 debt vs. equity classification; OID accrual under IRC §1273",
+        "EFTPS deposit schedule — enroll and confirm monthly vs. semiweekly depositor classification",
+    ],
+    "seed": [
+        "IRC §409A — option grants must be at FMV per an independent §409A valuation",
+        "IRC §1202 QSBS eligibility tracking per share lot",
+        "IRC §83(b) elections for any unvested restricted stock grants in the prior 30 days",
+        "Form 1099-NEC for contractor payments ≥ $600; collect W-9 before first payment",
+        "FICA / federal and state payroll withholding; Form 941 quarterly deposits via EFTPS",
+        "IRC §174 — R&D expenditures must be capitalized and amortized (5-yr domestic / 15-yr foreign) — no immediate expensing on tax return",
+        "State income tax nexus — each state where an employee is based requires a corporate return and payroll registration",
+        "SAFE / convertible note — ASC 480/815 classification; bifurcation of embedded features; OID accrual",
+    ],
+    "series_a": [
+        "IRC §409A — every option grant requires a current independent appraisal (refresh ≥ annually)",
+        "IRC §422(d) — ISO annual $100,000 FMV limit per employee; excess auto-converts to NSO",
+        "Form 3921 — file for each ISO exercise by January 31; disclose AMT exposure to employees",
+        "Form 3922 — file for each ESPP stock transfer by January 31",
+        "IRC §409A on severance and deferred bonus arrangements (short-term deferral exception or compliant schedule)",
+        "Form 941 quarterly payroll tax deposits via EFTPS; verify depositor schedule (monthly vs. semiweekly)",
+        "Form 1099-NEC for all contractors ≥ $600",
+        "IRC §174 amortization — 5-year domestic / 15-year foreign; track deferred tax liability vs. ASC 730",
+        "State income tax nexus — corporate returns and payroll registrations for all states with remote employees",
+    ],
+    "series_b": [
+        "All Series A requirements, plus:",
+        "Post-Wayfair sales tax nexus — economic nexus thresholds (~$100K revenue or 200 transactions) in 45 states + DC",
+        "FBAR (FinCEN 114) — due April 15 if aggregate foreign account balance ever exceeded $10,000",
+        "IRC §382 ownership-change study after each equity round — limits annual NOL utilization permanently",
+        "IRC §41 R&D Tax Credit — contemporaneous QRE documentation; §174 mandatory 5-year amortization (post-2022)",
+        "IRC §280G — §4999 excise tax analysis on change-of-control acceleration payments",
+        "IRC §482 transfer pricing — arm's-length pricing and contemporaneous documentation for all related-party transactions",
+        "GILTI (IRC §951A) — include foreign subsidiary income annually; Form 5471 per CFC",
+        "State income tax nexus — apportionment formula analysis as employee headcount grows across states",
+        "EFTPS deposit schedule — reassess semiweekly vs. monthly classification after each hiring wave",
+    ],
+    "series_c_plus": [
+        "All Series B requirements, plus:",
+        "IRC §162(m) — $1M tax deduction cap on 'covered employee' compensation (permanent post-TCJA; no performance exception)",
+        "ASC 606 / IRC §451 revenue recognition — five-step model compliance; deferred revenue schedule",
+        "IRC §163(j) — business interest expense limited to 30% of ATI (EBIT basis post-2021)",
+        "SOX §302 / §404 — internal control readiness if pre-IPO or recently public",
+        "IRC §280G pre-IPO planning for all change-of-control and acceleration provisions",
+        "IRC §174 — multi-year amortization schedules and deferred tax provision for accumulated R&D spend",
+    ],
+}
+
+_STAGE_DISPLAY_NAMES: dict[str, str] = {
+    "pre_seed": "Pre-seed",
+    "seed": "Seed",
+    "series_a": "Series A",
+    "series_b": "Series B",
+    "series_c_plus": "Series C+",
+}
+
+_STAGE_ALIASES_API: dict[str, str] = {
+    "pre-seed": "pre_seed", "preseed": "pre_seed", "pre_seed": "pre_seed",
+    "seed": "seed",
+    "series-a": "series_a", "series_a": "series_a", "a": "series_a",
+    "series-b": "series_b", "series_b": "series_b", "b": "series_b",
+    "series-c": "series_c_plus", "series_c": "series_c_plus",
+    "series-c+": "series_c_plus", "series_c_plus": "series_c_plus",
+    "c": "series_c_plus", "c+": "series_c_plus",
+    "growth": "series_c_plus", "pre-ipo": "series_c_plus", "pre_ipo": "series_c_plus",
+}
+
+_STAGE_ORDER = ["pre_seed", "seed", "series_a", "series_b", "series_c_plus"]
+
+_COMPLIANCE_SYSTEM = (
+    "You are an expert IRS and startup financial compliance analyst. "
+    "You will be given one or more financial documents (with their type labels) "
+    "uploaded by a startup founder, along with their funding stage. "
+    "Analyze the documents for IRS and tax compliance risks specific to their stage. "
+    "Focus only on what the documents show or are missing — do not invent facts. "
+    "If a document type is present but the content is insufficient to evaluate a "
+    "compliance area, say so explicitly in the finding. "
+    "Return ONLY valid JSON with this exact schema:\n"
+    '{"overall_risk": "Low|Moderate|High|Unknown", "risk_score": 0-100, '
+    '"summary": "1-2 sentence summary", '
+    '"issues": [{"area": "string", "irc_section": "§xxx or N/A", '
+    '"finding": "what the document shows or is missing", '
+    '"recommendation": "specific next step", "severity": "high|medium|low"}], '
+    '"notes": ["string"]}\n'
+    "No prose outside the JSON. No markdown fences."
+)
+
+
+_INTL_KEYWORDS     = ("fbar", "fatca", "gilti", "§482", "transfer pricing", "cfc", "form 5471",
+                      "subpart f", "foreign subsidiary", "offshore", "international")
+_RD_KEYWORDS       = ("r&d", "§41", "§174", "research credit", "qre", "research expense",
+                      "development cost", "174 amortiz")
+_CORP_KEYWORDS     = ("qsbs", "§1202", "iso", "espp", "§422", "form 3921", "form 3922",
+                      "§280g", "§162(m)", "162(m)", "incentive stock")
+_STATE_KEYWORDS    = ("state income tax nexus", "apportionment", "state corporate",
+                      "throwback", "single sales factor")
+_RD_API_INDUSTRIES = frozenset({"saas", "software", "hardware", "iot", "biotech",
+                                 "life_sciences", "life sciences", "deeptech"})
+_SUB_API_INDUSTRIES = frozenset({"saas", "software", "fintech", "ecommerce", "marketplace"})
+
+
+def _filter_requirements(
+    requirements: list[str],
+    entity_type: str | None,
+    industry: str | None,
+    international: str | None,
+    multi_state: bool,
+) -> list[str]:
+    """Return only the compliance requirements applicable to this company's profile."""
+    ent = (entity_type or "").lower().replace("-", "_")
+    ind = (industry or "").lower().replace(" / ", "_").replace("/", "_").replace(" ", "_")
+
+    is_non_corp   = ent and ent != "c_corp"
+    is_domestic   = international == "no"
+    is_non_rd     = ind and not any(k in ind for k in _RD_API_INDUSTRIES)
+    is_non_sub_rev = ind and not any(k in ind for k in _SUB_API_INDUSTRIES)
+
+    filtered = []
+    for req in requirements:
+        low = req.lower()
+        if is_domestic   and any(k in low for k in _INTL_KEYWORDS):
+            continue
+        if is_non_corp   and any(k in low for k in _CORP_KEYWORDS):
+            continue
+        if is_non_rd     and any(k in low for k in _RD_KEYWORDS):
+            continue
+        if not multi_state and any(k in low for k in _STATE_KEYWORDS):
+            continue
+        filtered.append(req)
+    return filtered
+
+
+def _build_compliance_prompt(
+    company_name: str,
+    stage_key: str,
+    documents: list[dict],  # [{"type": label, "text": str}]
+    entity_type: str | None = None,
+    company_size: str | None = None,
+    industry: str | None = None,
+    operating_states: list[str] | None = None,
+    international_presence: str | None = None,
+) -> str:
+    stage_name = _STAGE_DISPLAY_NAMES.get(stage_key, stage_key)
+    requirements = _COMPLIANCE_STAGE_REQUIREMENTS.get(stage_key, [])
+
+    lines = [f"COMPANY: {company_name}", f"FUNDING STAGE: {stage_name}"]
+    if entity_type:
+        lines.append(f"ENTITY TYPE: {entity_type.replace('_', '-').upper()}")
+    if company_size:
+        lines.append(f"TEAM SIZE: {company_size.replace('_', '–')} employees")
+    if industry:
+        lines.append(f"INDUSTRY: {industry}")
+    if operating_states:
+        lines.append(f"OPERATING STATES: {', '.join(operating_states)}")
+        if len(operating_states) > 1:
+            lines.append(f"MULTI-STATE NOTE: {len(operating_states)} states — evaluate state income tax nexus, "
+                         "apportionment, and employer registration gaps for each state.")
+    if international_presence == "yes":
+        lines.append("INTERNATIONAL PRESENCE: Yes — flag FBAR (FinCEN 114), FATCA (Form 8938), "
+                     "GILTI (§951A), Subpart F (§951), and IRC §482 transfer pricing risks.")
+
+    # Entity-specific rules
+    entity_notes = {
+        "c_corp": "C-Corp: check QSBS §1202 eligibility (≤$50M gross assets) at every stock issuance.",
+        "s_corp": "S-Corp: flag any disqualifying events — non-US shareholders, >100 shareholders, "
+                  "or multiple stock classes invalidate S-Corp status retroactively.",
+        "llc":    "LLC: confirm tax election on file (default disregarded entity/partnership vs. "
+                  "C-Corp/S-Corp election via Form 8832/2553). QSBS §1202 requires C-Corp status.",
+    }
+    if entity_type and entity_type in entity_notes:
+        lines.append(f"ENTITY NOTE: {entity_notes[entity_type]}")
+
+    filtered_reqs = _filter_requirements(
+        requirements,
+        entity_type=entity_type,
+        industry=industry,
+        international=international_presence,
+        multi_state=bool(operating_states and len(operating_states) > 1),
+    )
+    lines += ["", f"CRITICAL COMPLIANCE AREAS FOR {stage_name.upper()}:"]
+    for req in filtered_reqs:
+        lines.append(f"  • {req}")
+
+    lines += ["", "DOCUMENTS PROVIDED:"]
+    for i, doc in enumerate(documents, 1):
+        doc_type = doc.get("type") or "Unspecified document"
+        text = doc.get("text", "").strip()
+        if len(text) > 6000:
+            text = text[:6000] + "\n[TRUNCATED]"
+        lines += [f"\n--- Document {i}: {doc_type} ---", text or "(empty)"]
+
+    lines += [
+        "",
+        "Evaluate each compliance area listed above against the documents provided. "
+        "Where multiple states are listed, flag state-specific nexus and registration gaps. "
+        "Flag any area where documentation is missing, incomplete, or shows a potential "
+        "IRS/tax risk. Assign overall_risk and risk_score based on the number and severity "
+        "of issues found.",
+    ]
+    return "\n".join(lines)
+
+
+@app.post("/api/compliance/audit")
+async def compliance_audit(
+    company_name: Optional[str] = Form(None),
+    funding_round: Optional[str] = Form(None),
+    entity_type: Optional[str] = Form(None),
+    company_size: Optional[str] = Form(None),
+    industry: Optional[str] = Form(None),
+    operating_states: Optional[str] = Form(None),   # JSON array of state codes
+    international_presence: Optional[str] = Form(None),  # "yes" | "no"
+    document_text: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    files: List[UploadFile] = File(default=[]),
+    document_types: Optional[str] = Form(None),     # JSON array of type labels
+    llm_provider: Optional[str] = Form(None),
+    llm_model: Optional[str] = Form(None),
+):
+    """Stage-aware IRS/tax compliance audit of uploaded financial documents.
+
+    Accepts one or more documents with optional document-type labels and a
+    funding round, then uses an LLM to surface stage-specific compliance gaps.
+    Backward-compatible with the single-file + document_text legacy interface.
+    """
+    stage_key = _STAGE_ALIASES_API.get((funding_round or "seed").strip().lower(), "seed")
+    name = (company_name or "").strip() or "(unspecified)"
+
+    doc_type_labels: list[str] = []
+    if document_types:
+        try:
+            parsed = _json.loads(document_types)
+            if isinstance(parsed, list):
+                doc_type_labels = [str(t) for t in parsed]
+        except (ValueError, TypeError):
+            pass
+
+    # Collect all document texts with type labels.
+    documents: list[dict] = []
+
+    all_files = [f for f in ([file] + list(files)) if f is not None and f.filename]
+    for i, uf in enumerate(all_files):
+        try:
+            text = _extract_text(uf)
+        except Exception as exc:
+            raise HTTPException(400, f"Could not read '{uf.filename}': {exc}") from exc
+        label = doc_type_labels[i] if i < len(doc_type_labels) else uf.filename
+        documents.append({"type": label, "text": text})
+
+    if document_text and document_text.strip():
+        documents.append({"type": "Pasted text", "text": document_text.strip()})
+
+    if not documents:
+        raise HTTPException(400, "Provide at least one file or document_text.")
+
+    states_list: list[str] = []
+    if operating_states:
+        try:
+            parsed = _json.loads(operating_states)
+            if isinstance(parsed, list):
+                states_list = [str(s) for s in parsed]
+        except (ValueError, TypeError):
+            pass
+
+    prompt = _build_compliance_prompt(
+        name, stage_key, documents,
+        entity_type=entity_type,
+        company_size=company_size,
+        industry=industry,
+        operating_states=states_list or None,
+        international_presence=international_presence,
+    )
+    try:
+        client = _get_llm_client(provider=llm_provider, model=llm_model)
+        resp = client.complete(
+            messages=[
+                {"role": "system", "content": _COMPLIANCE_SYSTEM},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+            response_format={"type": "json_object"},
+        )
+        result = _json.loads(resp.content or "{}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Compliance audit failed: {exc}") from exc
+
+    result.setdefault("overall_risk", "Unknown")
+    result.setdefault("risk_score", None)
+    result.setdefault("summary", "No summary returned.")
+    result.setdefault("issues", [])
+    result.setdefault("notes", [])
+    result["stage"] = _STAGE_DISPLAY_NAMES.get(stage_key, stage_key)
+    return result
 
 
 @app.get("/api/bills/{bill_number}")
@@ -631,3 +1111,107 @@ def legal_savings(
         state=state,
         hourly_rate_override=hourly_rate,
     )
+
+
+# ── /api/scan ─────────────────────────────────────────────────────────────────
+
+class RepoScanRequest(BaseModel):
+    repo_url: str
+    industry: Optional[str] = None
+    product_name: Optional[str] = None
+    vuln_osv: bool = True
+    outdated_registry: bool = False
+    # Optional founder questionnaire + PRD that drive the AI-tailored CustomScanner.
+    # When omitted, the custom scanner is a no-op (returns no findings).
+    questionnaire: Optional[dict] = None
+    prd_text: Optional[str] = None
+
+
+@app.post("/api/scan")
+def scan_repo(req: RepoScanRequest):
+    """Run all startup-risk scanners on a public GitHub repository."""
+    import time
+    import re as _re
+
+    startup_risk_root = Path(__file__).resolve().parents[1] / "startup-risk"
+    if str(startup_risk_root) not in sys.path:
+        sys.path.insert(0, str(startup_risk_root))
+
+    try:
+        from startup_risk.core.engine import ScanEngine
+        from startup_risk.ingest.repository import RepositoryIngestor
+        from startup_risk.scanners.registry import default_scanners
+    except ImportError as exc:
+        raise HTTPException(500, f"startup-risk module not available: {exc}") from exc
+
+    # Validate: public GitHub HTTPS URL only
+    if not _re.match(r"^https://github\.com/[\w.\-]+/[\w.\-]+(/?)?$", req.repo_url.strip()):
+        raise HTTPException(400, "Only public GitHub HTTPS URLs are supported.")
+
+    start = time.time()
+    try:
+        scanners = default_scanners(
+            deterministic_license_only=True,
+            vuln_osv=req.vuln_osv,
+            outdated_registry=req.outdated_registry,
+            custom_questionnaire=req.questionnaire,
+            custom_prd_text=req.prd_text,
+        )
+        result = ScanEngine(
+            ingestor=RepositoryIngestor(),
+            scanners=scanners,
+        ).scan(req.repo_url.strip())
+    except Exception as exc:
+        raise HTTPException(502, f"Scan failed: {exc}") from exc
+
+    elapsed = round(time.time() - start, 1)
+
+    # Transform Finding objects into the frontend-expected shape
+    def _finding_to_dict(f) -> dict:
+        evidence = []
+        for ev in (f.evidence or []):
+            loc = ev.location
+            evidence.append({
+                "file": loc.path if loc else None,
+                "line": loc.line_start if loc else None,
+                "excerpt": ev.excerpt or ev.description,
+            })
+        return {
+            "id": f.id,
+            "title": f.title,
+            "description": f.description,
+            "category": f.category,
+            "severity": f.severity,
+            "confidence": f.confidence,
+            "evidence": evidence,
+            "recommendation": f.recommendation,
+            "scanner": f.scanner_id,
+        }
+
+    findings = [_finding_to_dict(f) for f in result.findings]
+
+    # Trivy comparison metadata — precomputed from our benchmark run
+    _TRIVY_KNOWN = {
+        "django/django": {
+            "trivy_findings": 0,
+            "trivy_vulns": 0,
+            "trivy_secrets": 0,
+            "trivy_note": "Trivy scanned django/django and found 0 vulnerabilities. It missed GHSA-27jp-wm6q-gp25 because its uv lockfile parser does not read optional dependencies declared in pyproject.toml.",
+        },
+    }
+    slug = "/".join(req.repo_url.strip().rstrip("/").split("/")[-2:])
+    trivy_comparison = _TRIVY_KNOWN.get(slug)
+
+    our_vulns = sum(1 for f in findings if f["category"] == "dependency_vulnerability")
+    our_secrets = sum(1 for f in findings if f["category"] == "secret_exposure")
+
+    return {
+        "repo": slug,
+        "findings": findings,
+        "summary": result.summary.model_dump(),
+        "timing_seconds": elapsed,
+        "scanners_run": list({f["scanner"] for f in findings}),
+        "trivy_comparison": trivy_comparison,
+        "our_vuln_count": our_vulns,
+        "our_secret_count": our_secrets,
+    }

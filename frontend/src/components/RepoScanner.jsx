@@ -5,39 +5,67 @@ import {
   BookOpen, Code2, Cpu, Building2, Layers, ArrowLeft,
   ShieldAlert, FileSearch, Package, Lock, BarChart2,
   Loader2, ExternalLink, ChevronDown, ChevronUp,
+  KeyRound, Bug, RefreshCw, ShieldCheck, Sparkles,
 } from "lucide-react";
 
 // ── Industry verticals ────────────────────────────────────────────────────────
 
 const INDUSTRIES = [
-  { id: "health",     label: "Health & MedTech",   Icon: Heart,      desc: "HIPAA · PHI · patient data",           color: "text-rose-500",   bg: "bg-rose-50",   border: "border-rose-200" },
-  { id: "fintech",    label: "Fintech",             Icon: DollarSign, desc: "PCI DSS · financial regulations",      color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-200" },
-  { id: "saas",       label: "Consumer SaaS",       Icon: Globe,      desc: "GDPR · CCPA · privacy",                color: "text-blue-500",   bg: "bg-blue-50",   border: "border-blue-200" },
-  { id: "edtech",     label: "EdTech",              Icon: BookOpen,   desc: "FERPA · COPPA · student data",         color: "text-violet-500", bg: "bg-violet-50", border: "border-violet-200" },
-  { id: "devtools",   label: "Developer Tools",     Icon: Code2,      desc: "OSS licenses · supply chain",          color: "text-orange-500", bg: "bg-orange-50", border: "border-orange-200" },
-  { id: "ai",         label: "AI / ML",             Icon: Cpu,        desc: "AI data use · training data",          color: "text-purple-500", bg: "bg-purple-50", border: "border-purple-200" },
-  { id: "enterprise", label: "Enterprise B2B",      Icon: Building2,  desc: "SOC 2 · access control · compliance",  color: "text-slate-600",  bg: "bg-slate-50",  border: "border-slate-200" },
-  { id: "other",      label: "Other / General",     Icon: Layers,     desc: "General security & hygiene scan",      color: "text-text-secondary", bg: "bg-chip", border: "border-border" },
+  { id: "health",     label: "Health & MedTech",  Icon: Heart,      desc: "HIPAA · PHI · patient data",          color: "text-rose-500",    bg: "bg-rose-50",    border: "border-rose-200" },
+  { id: "fintech",    label: "Fintech",            Icon: DollarSign, desc: "PCI DSS · financial regulations",     color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-200" },
+  { id: "saas",       label: "Consumer SaaS",      Icon: Globe,      desc: "GDPR · CCPA · privacy",               color: "text-blue-500",    bg: "bg-blue-50",    border: "border-blue-200" },
+  { id: "edtech",     label: "EdTech",             Icon: BookOpen,   desc: "FERPA · COPPA · student data",        color: "text-violet-500",  bg: "bg-violet-50",  border: "border-violet-200" },
+  { id: "devtools",   label: "Developer Tools",    Icon: Code2,      desc: "OSS licenses · supply chain",         color: "text-orange-500",  bg: "bg-orange-50",  border: "border-orange-200" },
+  { id: "ai",         label: "AI / ML",            Icon: Cpu,        desc: "AI data use · training data",         color: "text-purple-500",  bg: "bg-purple-50",  border: "border-purple-200" },
+  { id: "enterprise", label: "Enterprise B2B",     Icon: Building2,  desc: "SOC 2 · access control · compliance", color: "text-slate-600",   bg: "bg-slate-50",   border: "border-slate-200" },
+  { id: "other",      label: "Other / General",    Icon: Layers,     desc: "General security & hygiene scan",     color: "text-text-secondary", bg: "bg-chip",    border: "border-border" },
 ];
 
-// ── Scanners that run per scan ────────────────────────────────────────────────
+// ── Scanners ──────────────────────────────────────────────────────────────────
+// These match the actual scanner IDs in the backend.
 
+// kind: "scanner" = deterministic check; "agent" = LLM-driven reasoning.
 const BASE_SCANNERS = [
-  { id: "hygiene",      label: "Static hygiene",         Icon: FileSearch },
-  { id: "deps",         label: "Dependency supply chain", Icon: Package },
-  { id: "licenses",     label: "License inventory",      Icon: Lock },
-  { id: "analytics",    label: "Analytics & privacy",    Icon: BarChart2 },
+  { id: "static_hygiene",  kind: "scanner", label: "Repository hygiene",      Icon: FileSearch,  desc: "Missing files, sensitive filenames" },
+  { id: "license_scanner", kind: "scanner", label: "License inventory",       Icon: Lock,        desc: "GPL · AGPL · copyleft obligations" },
+  { id: "secret_scanner",  kind: "scanner", label: "Secret detection",        Icon: KeyRound,    desc: "Hardcoded keys, PEM certs, connection strings" },
+  { id: "dependency_vuln", kind: "scanner", label: "Dependency vulnerabilities", Icon: Bug,      desc: "Known CVEs via OSV database" },
+  { id: "outdated_deps",   kind: "scanner", label: "Outdated dependencies",   Icon: RefreshCw,   desc: "Behind-latest packages per registry" },
+  { id: "analytics_privacy", kind: "scanner", label: "Analytics & logging privacy", Icon: BarChart2, desc: "Analytics SDKs, PII in logs, log retention" },
+  { id: "code_compliance", kind: "agent",   label: "Code compliance agent",   Icon: ShieldCheck, desc: "LLM review of privacy, cookie, tracking & PII risk" },
+  { id: "auth_access_control", kind: "agent", label: "Auth & access-control agent", Icon: ShieldAlert, desc: "Authz flows, IDOR, missing access checks" },
+  { id: "pii_data_flow",   kind: "agent",   label: "PII data-flow agent",     Icon: Globe,       desc: "Traces personal data; retention, consent, encryption gaps" },
+  { id: "infra_misconfig", kind: "agent",   label: "Infra misconfig agent",   Icon: Building2,   desc: "Dockerfiles, CORS, exposed ports, IaC settings" },
+  { id: "vuln_exploitability", kind: "agent", label: "Vuln exploitability agent", Icon: Package,  desc: "Reachability of known CVEs in your code" },
+  { id: "custom_compliance", kind: "agent", label: "AI-tailored agent",       Icon: Sparkles,    desc: "Startup-specific rules generated from your profile" },
 ];
 
+// Industry-specific scanners shown as aspirational (coming soon) in the scanner preview
 const INDUSTRY_SCANNERS = {
-  health:     [{ id: "hipaa",   label: "HIPAA / PHI rules",        Icon: Heart }],
-  fintech:    [{ id: "pci",     label: "PCI DSS / financial data", Icon: DollarSign }],
-  saas:       [{ id: "gdpr",    label: "GDPR / CCPA compliance",   Icon: Globe }],
-  edtech:     [{ id: "ferpa",   label: "FERPA / COPPA rules",      Icon: BookOpen }],
-  devtools:   [{ id: "oss",     label: "OSS license risk",         Icon: Code2 }],
-  ai:         [{ id: "aidata",  label: "AI data use rules",        Icon: Cpu }],
-  enterprise: [{ id: "soc2",    label: "SOC 2 readiness checks",   Icon: Building2 }],
+  health:     [{ id: "hipaa",  label: "HIPAA / PHI rules",        Icon: Heart,      desc: "Coming soon" }],
+  fintech:    [{ id: "pci",    label: "PCI DSS / financial data",  Icon: DollarSign, desc: "Coming soon" }],
+  saas:       [{ id: "gdpr",   label: "GDPR / CCPA compliance",    Icon: Globe,      desc: "Coming soon" }],
+  edtech:     [{ id: "ferpa",  label: "FERPA / COPPA rules",       Icon: BookOpen,   desc: "Coming soon" }],
+  devtools:   [{ id: "oss",    label: "OSS license risk",          Icon: Code2,      desc: "Coming soon" }],
+  ai:         [{ id: "aidata", label: "AI data use rules",         Icon: Cpu,        desc: "Coming soon" }],
+  enterprise: [{ id: "soc2",   label: "SOC 2 readiness checks",    Icon: Building2,  desc: "Coming soon" }],
   other:      [],
+};
+
+// Human-readable scanner names for the FindingCard attribution badge
+const SCANNER_LABELS = {
+  static_hygiene:  "Repository Hygiene",
+  license_scanner: "License",
+  secret_scanner:  "Secret Scanner",
+  dependency_vuln: "Dependency Vuln",
+  outdated_deps:   "Outdated Deps",
+  analytics_privacy: "Analytics & Logging",
+  code_compliance: "Code Compliance Agent",
+  auth_access_control: "Auth & Access-Control Agent",
+  pii_data_flow: "PII Data-Flow Agent",
+  infra_misconfig: "Infra Misconfig Agent",
+  vuln_exploitability: "Vuln Exploitability Agent",
+  custom_compliance: "AI-Tailored Agent",
 };
 
 // ── Severity config ───────────────────────────────────────────────────────────
@@ -61,12 +89,6 @@ function ownerRepo(url) {
   return m ? m[1] : url;
 }
 
-function evidenceLabel(ev) {
-  const path = ev.location?.path ?? ev.file ?? ev.path ?? ev.source ?? "—";
-  const line = ev.location?.line_start ?? ev.line_start ?? ev.line;
-  return `${path}${line ? `:${line}` : ""}`;
-}
-
 function shouldUsePlaceholderResults(err) {
   const message = String(err?.message || "");
   return (
@@ -78,12 +100,28 @@ function shouldUsePlaceholderResults(err) {
   );
 }
 
+// Normalise evidence from the backend (location.path / location.line_start)
+// or from old-style placeholder objects (file / line).
+function evidenceLocation(ev) {
+  if (ev.location?.path) {
+    return {
+      path: ev.location.path,
+      line: ev.location.line_start ?? null,
+    };
+  }
+  return {
+    path: ev.file ?? ev.path ?? ev.source ?? null,
+    line: ev.line_start ?? ev.line ?? null,
+  };
+}
+
 // ── Finding card ──────────────────────────────────────────────────────────────
 
 function FindingCard({ finding }) {
   const [open, setOpen] = useState(false);
   const sev = SEV[finding.severity] ?? SEV.info;
   const SevIcon = sev.Icon;
+  const scannerLabel = SCANNER_LABELS[finding.scanner_id] ?? finding.scanner_id;
 
   return (
     <div className={`rounded-2xl border ${sev.border} ${sev.bg} overflow-hidden`}>
@@ -105,16 +143,19 @@ function FindingCard({ finding }) {
                 {finding.confidence} confidence
               </span>
             )}
+            {scannerLabel && (
+              <span className="rounded-full px-2 py-0.5 text-[11px] text-text-muted bg-white/60 border border-border/60">
+                {scannerLabel}
+              </span>
+            )}
           </div>
           <p className="mt-1 text-[13px] text-text-secondary leading-relaxed line-clamp-2">
             {finding.description}
           </p>
         </div>
-        {open ? (
-          <ChevronUp className="shrink-0 h-4 w-4 text-text-muted mt-0.5" />
-        ) : (
-          <ChevronDown className="shrink-0 h-4 w-4 text-text-muted mt-0.5" />
-        )}
+        {open
+          ? <ChevronUp className="shrink-0 h-4 w-4 text-text-muted mt-0.5" />
+          : <ChevronDown className="shrink-0 h-4 w-4 text-text-muted mt-0.5" />}
       </button>
 
       {open && (
@@ -122,13 +163,25 @@ function FindingCard({ finding }) {
           {finding.evidence && finding.evidence.length > 0 && (
             <div>
               <div className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">Evidence</div>
-              <div className="space-y-1">
-                {finding.evidence.map((ev, i) => (
-                  <div key={i} className="flex items-start gap-2 text-[12px] text-text-secondary font-mono bg-white/60 rounded-lg px-3 py-1.5 border border-border/50">
-                    <span className="text-text-muted shrink-0">{evidenceLabel(ev)}</span>
-                    {ev.excerpt && <span className="text-text-primary truncate">{ev.excerpt}</span>}
-                  </div>
-                ))}
+              <div className="space-y-1.5">
+                {finding.evidence.map((ev, i) => {
+                  const loc = evidenceLocation(ev);
+                  return (
+                    <div key={i} className="text-[12px] bg-white/70 rounded-lg px-3 py-2 border border-border/50 space-y-1">
+                      {loc.path && (
+                        <div className="font-mono text-text-muted">
+                          {loc.path}{loc.line ? `:${loc.line}` : ""}
+                        </div>
+                      )}
+                      {ev.excerpt && (
+                        <div className="font-mono text-text-primary truncate">{ev.excerpt}</div>
+                      )}
+                      {ev.description && (
+                        <div className="text-text-secondary text-[11px]">{ev.description}</div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -155,7 +208,9 @@ function ScanningView({ scanners, log }) {
         </div>
         <div>
           <h2 className="text-[20px] font-bold text-text-primary">Scanning repository…</h2>
-          <p className="text-[13px] text-text-secondary mt-1">Running {scanners.length} scanners. This takes about 15–30 seconds.</p>
+          <p className="text-[13px] text-text-secondary mt-1">
+            Running {scanners.length} scanners. This takes 15–30 seconds.
+          </p>
         </div>
       </div>
 
@@ -172,9 +227,14 @@ function ScanningView({ scanners, log }) {
               ) : (
                 <Circle className="h-5 w-5 text-text-muted shrink-0" strokeWidth={1.5} />
               )}
-              <span className={`text-[14px] ${done ? "text-text-primary font-medium" : active ? "text-accent-gold font-medium" : "text-text-muted"}`}>
-                {s.label}
-              </span>
+              <div className="flex-1 min-w-0">
+                <span className={`text-[14px] ${done ? "text-text-primary font-medium" : active ? "text-accent-gold font-medium" : "text-text-muted"}`}>
+                  {s.label}
+                </span>
+                {s.desc && (
+                  <span className="ml-2 text-[11px] text-text-muted">{s.desc}</span>
+                )}
+              </div>
             </div>
           );
         })}
@@ -185,7 +245,7 @@ function ScanningView({ scanners, log }) {
 
 // ── Results view ──────────────────────────────────────────────────────────────
 
-function ResultsView({ results, repoUrl, industry, onReset, onViewIssues }) {
+function ResultsView({ results, repoUrl, industry, onboardingProfile, onReset, onViewIssues, onNavigate }) {
   const findings = results.findings ?? [];
   const counts = Object.fromEntries(
     Object.keys(SEV).map((k) => [k, findings.filter((f) => f.severity === k).length])
@@ -196,6 +256,9 @@ function ResultsView({ results, repoUrl, industry, onReset, onViewIssues }) {
   const bySeverity = ["critical", "high", "medium", "low", "info"]
     .map((sev) => ({ sev, items: findings.filter((f) => f.severity === sev) }))
     .filter((g) => g.items.length > 0);
+
+  // Which scanners produced at least one finding
+  const activeScanners = [...new Set(findings.map((f) => f.scanner_id).filter(Boolean))];
 
   return (
     <div className="space-y-8">
@@ -222,13 +285,25 @@ function ResultsView({ results, repoUrl, industry, onReset, onViewIssues }) {
             )}
           </div>
           <h2 className="text-[24px] font-bold text-text-primary">
-            {total === 0 ? "No findings" : `${total} finding${total !== 1 ? "s" : ""} detected`}
+            {total === 0
+              ? "No findings"
+              : `${total} finding${total !== 1 ? "s" : ""} detected`}
           </h2>
           <p className="text-[14px] text-text-secondary mt-1">
             {total === 0
               ? "This repo looks clean across all scanned dimensions."
-              : "Review each finding below. Severity and confidence are listed independently."}
+              : "Review each finding below. Severity and confidence are shown independently."}
           </p>
+          {activeScanners.length > 0 && (
+            <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] text-text-muted">Scanners with findings:</span>
+              {activeScanners.map((id) => (
+                <span key={id} className="rounded-full bg-chip border border-border px-2 py-0.5 text-[11px] text-text-secondary">
+                  {SCANNER_LABELS[id] ?? id}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
@@ -253,15 +328,16 @@ function ResultsView({ results, repoUrl, industry, onReset, onViewIssues }) {
       {/* Severity summary strip */}
       <div className="grid grid-cols-5 gap-3">
         {Object.entries(SEV).map(([key, cfg]) => (
-          <div
-            key={key}
-            className={`rounded-2xl border ${cfg.border} ${cfg.bg} px-4 py-3 text-center`}
-          >
+          <div key={key} className={`rounded-2xl border ${cfg.border} ${cfg.bg} px-4 py-3 text-center`}>
             <div className={`text-[22px] font-bold tabular-nums ${cfg.color}`}>{counts[key] ?? 0}</div>
             <div className="text-[11px] text-text-muted mt-0.5">{cfg.label}</div>
           </div>
         ))}
       </div>
+
+      {onboardingProfile && (
+        <WorkspaceReady profile={onboardingProfile} onNavigate={onNavigate} />
+      )}
 
       {/* Findings grouped by severity */}
       {total === 0 ? (
@@ -283,9 +359,7 @@ function ResultsView({ results, repoUrl, industry, onReset, onViewIssues }) {
                   <div className="h-px flex-1 bg-border" />
                 </div>
                 <div className="space-y-2">
-                  {items.map((f) => (
-                    <FindingCard key={f.id ?? f.title} finding={f} />
-                  ))}
+                  {items.map((f) => <FindingCard key={f.id ?? f.title} finding={f} />)}
                 </div>
               </div>
             );
@@ -302,52 +376,120 @@ function ResultsView({ results, repoUrl, industry, onReset, onViewIssues }) {
   );
 }
 
+function WorkspaceReady({ profile, onNavigate }) {
+  const links = [
+    { id: "benchmark", label: "Benchmark", body: "Compare scanner signals against advisory-style examples." },
+    { id: "startup", label: "Startup Health", body: "Grade legal, financial, product, and custom AI readiness." },
+    { id: "recs", label: "Recommendations", body: "Track the highest-leverage fixes from your workspace." },
+  ];
+  return (
+    <div className="rounded-3xl border border-border bg-card p-5 shadow-card">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-text-muted">
+            Your workspace is ready
+          </div>
+          <h3 className="mt-1 text-[20px] font-bold tracking-tight text-text-primary">
+            {profile.companyName || "Company"} has a scanner profile.
+          </h3>
+          <p className="mt-1 max-w-[560px] text-[13px] leading-relaxed text-text-secondary">
+            The dashboard is unlocked with your repo, industry, stage, customer type, and data profile
+            saved for this browser session.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-border-muted bg-chip-alt px-4 py-3 text-[12px] text-text-secondary">
+          <div className="font-semibold text-text-primary">{profile.repoUrl}</div>
+          <div className="mt-1 capitalize">{profile.industry || "other"} · {profile.stage || "stage unknown"}</div>
+        </div>
+      </div>
+      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+        {links.map((link) => (
+          <button
+            key={link.id}
+            onClick={() => onNavigate?.(link.id)}
+            className="rounded-2xl border border-border bg-chip-alt p-4 text-left transition-all hover:-translate-y-0.5 hover:border-action-dark hover:bg-card hover:shadow-card"
+          >
+            <div className="text-[13px] font-semibold text-text-primary">{link.label}</div>
+            <div className="mt-1 text-[12px] leading-relaxed text-text-secondary">{link.body}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function RepoScanner({ onScanComplete, onViewIssues }) {
+export default function RepoScanner({
+  onScanComplete,
+  onViewIssues,
+  onboardingProfile = null,
+  autoStartToken = null,
+  onAutoStartConsumed,
+  onNavigate,
+} = {}) {
   const [step, setStep] = useState("form"); // "form" | "scanning" | "results"
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(onboardingProfile?.repoUrl || "");
   const [urlError, setUrlError] = useState("");
-  const [industry, setIndustry] = useState(null);
-  const [productName, setProductName] = useState("");
+  const [industry, setIndustry] = useState(onboardingProfile?.industry || null);
+  const [productName, setProductName] = useState(onboardingProfile?.companyName || "");
   const [results, setResults] = useState(null);
   const [apiError, setApiError] = useState("");
   const [scanLog, setScanLog] = useState([]);
+  const consumedAutoStartRef = useRef(null);
+
   const scanners = [
     ...BASE_SCANNERS,
     ...(industry ? (INDUSTRY_SCANNERS[industry] ?? []) : []),
   ];
-  const logRef = useRef(null);
 
-  // Simulate scanner progress ticks while request is in-flight
+  // Tick through scanners during the request to show progress
   useEffect(() => {
     if (step !== "scanning") return;
     setScanLog([]);
     let i = 0;
     const interval = setInterval(() => {
-      if (i < scanners.length) {
-        setScanLog((prev) => [...prev, scanners[i].id]);
+      if (i < BASE_SCANNERS.length) {
+        setScanLog((prev) => [...prev, BASE_SCANNERS[i].id]);
         i++;
       } else {
         clearInterval(interval);
       }
     }, 1800);
     return () => clearInterval(interval);
-  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [step]);
 
-  async function handleScan() {
+  useEffect(() => {
+    if (!onboardingProfile || step !== "form") return;
+    setUrl(onboardingProfile.repoUrl || "");
+    setIndustry(onboardingProfile.industry || null);
+    setProductName(onboardingProfile.companyName || "");
+  }, [onboardingProfile, step]);
+
+  useEffect(() => {
+    if (!autoStartToken || consumedAutoStartRef.current === autoStartToken || !onboardingProfile) return;
+    consumedAutoStartRef.current = autoStartToken;
+    runScan(onboardingProfile.repoUrl, onboardingProfile.industry, onboardingProfile.companyName);
+    onAutoStartConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStartToken, onboardingProfile]);
+
+  async function runScan(scanUrl = url, scanIndustry = industry, scanProductName = productName) {
     setUrlError("");
     setApiError("");
 
-    if (!validateGithubUrl(url)) {
+    if (!validateGithubUrl(scanUrl || "")) {
       setUrlError("Please enter a valid public GitHub URL (https://github.com/owner/repo).");
       return;
     }
-    if (!industry) {
+    if (!scanIndustry) {
       setUrlError("Please select an industry to load the right scanners.");
       return;
     }
 
+    setUrl(scanUrl.trim());
+    setIndustry(scanIndustry);
+    setProductName(scanProductName || "");
     setStep("scanning");
 
     try {
@@ -355,9 +497,18 @@ export default function RepoScanner({ onScanComplete, onViewIssues }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          repo_url: url.trim(),
-          industry,
-          product_name: productName || undefined,
+          repo_url: scanUrl.trim(),
+          industry: scanIndustry,
+          product_name: scanProductName || undefined,
+          // Drives the AI-tailored CustomScanner using the onboarding profile.
+          questionnaire: {
+            industry: scanIndustry,
+            product_name: scanProductName || undefined,
+            stage: onboardingProfile?.stage,
+            customers: onboardingProfile?.customers,
+            sensitive_data: onboardingProfile?.sensitiveData,
+            gtm: onboardingProfile?.gtm,
+          },
         }),
       });
 
@@ -370,9 +521,9 @@ export default function RepoScanner({ onScanComplete, onViewIssues }) {
       setResults(data);
       onScanComplete?.({
         results: data,
-        repoUrl: url.trim(),
-        industry,
-        productName: productName || "",
+        repoUrl: scanUrl.trim(),
+        industry: scanIndustry,
+        productName: scanProductName || "",
       });
       setStep("results");
     } catch (err) {
@@ -381,9 +532,9 @@ export default function RepoScanner({ onScanComplete, onViewIssues }) {
         setResults(PLACEHOLDER_RESULTS);
         onScanComplete?.({
           results: PLACEHOLDER_RESULTS,
-          repoUrl: url.trim(),
-          industry,
-          productName: productName || "",
+          repoUrl: scanUrl.trim(),
+          industry: scanIndustry,
+          productName: scanProductName || "",
         });
         setStep("results");
       } else {
@@ -391,6 +542,10 @@ export default function RepoScanner({ onScanComplete, onViewIssues }) {
         setStep("form");
       }
     }
+  }
+
+  async function handleScan() {
+    await runScan();
   }
 
   function handleReset() {
@@ -405,7 +560,6 @@ export default function RepoScanner({ onScanComplete, onViewIssues }) {
   if (step === "form") {
     return (
       <div className="space-y-10">
-        {/* Header */}
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-text-secondary text-[12px] uppercase tracking-widest">
             <ShieldAlert className="h-4 w-4 text-accent-gold" strokeWidth={2} />
@@ -415,8 +569,9 @@ export default function RepoScanner({ onScanComplete, onViewIssues }) {
             Scan any public GitHub repo.
           </h1>
           <p className="text-[16px] text-text-secondary max-w-[560px] leading-relaxed">
-            We compare what your code actually does against known risk patterns — license exposure,
-            privacy gaps, supply chain issues, and industry-specific compliance triggers.
+            We run {BASE_SCANNERS.length} scanners against your codebase — secrets, outdated dependencies,
+            known CVEs, license obligations, and privacy compliance patterns — and return evidence-backed
+            findings with file and line number.
           </p>
         </div>
 
@@ -456,7 +611,8 @@ export default function RepoScanner({ onScanComplete, onViewIssues }) {
         {/* Optional product name */}
         <div className="space-y-2">
           <label className="text-[13px] font-medium text-text-primary">
-            Product / company name <span className="text-text-muted font-normal">(optional)</span>
+            Product / company name{" "}
+            <span className="text-text-muted font-normal">(optional)</span>
           </label>
           <input
             type="text"
@@ -488,11 +644,11 @@ export default function RepoScanner({ onScanComplete, onViewIssues }) {
                       : "bg-card border-border shadow-card hover:shadow-card-hover"
                   }`}
                 >
-                  <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${selected ? bg : "bg-chip"} border ${selected ? border : "border-border"}`}>
-                    <Icon className={`h-4 w-4 ${selected ? color : "text-text-muted group-hover:" + color}`} strokeWidth={2} />
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-xl border ${selected ? `${bg} ${border}` : "bg-chip border-border"}`}>
+                    <Icon className={`h-4 w-4 ${selected ? color : "text-text-muted"}`} strokeWidth={2} />
                   </div>
                   <div>
-                    <div className={`text-[13px] font-semibold ${selected ? "text-text-primary" : "text-text-primary"}`}>{label}</div>
+                    <div className="text-[13px] font-semibold text-text-primary">{label}</div>
                     <div className="text-[11px] text-text-muted leading-snug mt-0.5">{desc}</div>
                   </div>
                   {selected && (
@@ -506,16 +662,31 @@ export default function RepoScanner({ onScanComplete, onViewIssues }) {
 
         {/* Scanners preview */}
         {industry && (
-          <div className="rounded-2xl border border-border bg-card/60 p-5 shadow-card space-y-2 animate-fade-in">
-            <div className="text-[12px] uppercase tracking-wider text-text-muted mb-3">Scanners that will run</div>
+          <div className="rounded-2xl border border-border bg-card/60 p-5 shadow-card space-y-3 animate-fade-in">
+            <div className="text-[12px] uppercase tracking-wider text-text-muted">Agents &amp; scanners that will run</div>
             <div className="flex flex-wrap gap-2">
-              {scanners.map((s) => (
+              {BASE_SCANNERS.map((s) => (
                 <span
                   key={s.id}
                   className="flex items-center gap-1.5 rounded-full border border-border bg-chip px-3 py-1 text-[12px] text-text-secondary"
                 >
                   <s.Icon className="h-3 w-3" strokeWidth={2} />
                   {s.label}
+                  {s.kind === "agent" && (
+                    <span className="ml-0.5 rounded-full bg-accent-gold/15 px-1.5 text-[9px] font-semibold uppercase tracking-wide text-accent-gold">
+                      Agent
+                    </span>
+                  )}
+                </span>
+              ))}
+              {(INDUSTRY_SCANNERS[industry] ?? []).map((s) => (
+                <span
+                  key={s.id}
+                  className="flex items-center gap-1.5 rounded-full border border-dashed border-border-chip bg-chip/60 px-3 py-1 text-[12px] text-text-muted"
+                >
+                  <s.Icon className="h-3 w-3" strokeWidth={2} />
+                  {s.label}
+                  <span className="text-[10px] opacity-60">soon</span>
                 </span>
               ))}
             </div>
@@ -533,30 +704,27 @@ export default function RepoScanner({ onScanComplete, onViewIssues }) {
           <ChevronRight className="h-4 w-4" strokeWidth={2.4} />
         </button>
 
-        {/* Disclaimer */}
         <p className="text-[11px] text-text-muted leading-relaxed max-w-lg">
-          Only public GitHub repositories are supported. No code is executed — all analysis is static.
-          Findings are possible triggers, not legal conclusions.
+          Only public GitHub repositories are supported. No code is executed — our agents read your repository, never run it.
+          Findings are possible risk triggers, not legal conclusions.
         </p>
       </div>
     );
   }
 
-  // ── Scanning ──────────────────────────────────────────────────────────────
-
   if (step === "scanning") {
     return <ScanningView scanners={scanners} log={scanLog} />;
   }
-
-  // ── Results ───────────────────────────────────────────────────────────────
 
   return (
     <ResultsView
       results={results}
       repoUrl={url}
       industry={industry}
+      onboardingProfile={onboardingProfile}
       onReset={handleReset}
       onViewIssues={onViewIssues}
+      onNavigate={onNavigate}
     />
   );
 }

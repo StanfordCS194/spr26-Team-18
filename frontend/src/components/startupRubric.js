@@ -3,7 +3,7 @@
 // score = 100 - (sum of failed weights / sum of evaluated weights * 100)
 // Composite = equal-weight average of axes with at least one evaluated rule.
 
-export const AXES = ["engineering", "legal", "financial", "compliance", "product"];
+export const AXES = ["engineering", "legal", "financial", "compliance", "product", "custom"];
 
 export const AXIS_LABELS = {
   engineering: "Engineering Health",
@@ -11,6 +11,7 @@ export const AXIS_LABELS = {
   financial: "Financial Health",
   compliance: "Compliance Health",
   product: "Product Coherence",
+  custom: "Custom (AI-tailored)",
 };
 
 export const AXIS_BLURBS = {
@@ -19,6 +20,7 @@ export const AXIS_BLURBS = {
   financial: "Runway, burn trajectory, revenue, expense discipline.",
   compliance: "GDPR/CCPA/COPPA posture, data handling, certifications.",
   product: "PRD completeness — problem, users, metrics, scope, timeline.",
+  custom: "Rules an LLM wrote specifically for this product, then graded.",
 };
 
 function repoFindingSummary(findings = []) {
@@ -552,7 +554,11 @@ export const RULES = [
 ];
 
 // ---- Scoring ----
-export function scoreFeatures(features) {
+// `customAxis` (optional) is the LLM-generated axis:
+//   { results: [{ id, title, weight, passed, observed, fix }] }
+// When omitted, the custom axis is excluded from the composite entirely
+// (so an A startup without a custom scan still grades as an A).
+export function scoreFeatures(features, customAxis = null) {
   const byAxis = {};
   for (const axis of AXES) {
     byAxis[axis] = {
@@ -608,26 +614,51 @@ export function scoreFeatures(features) {
     });
   }
 
+  if (customAxis && Array.isArray(customAxis.results)) {
+    for (const r of customAxis.results) {
+      const weight = r.weight || 8;
+      byAxis.custom.totalWeight += weight;
+      if (!r.passed) byAxis.custom.failedWeight += weight;
+      byAxis.custom.results.push({
+        id: r.id,
+        title: r.title,
+        weight,
+        passed: !!r.passed,
+        observed: r.observed || "",
+        fix: r.fix || "",
+        dollarImpact: 0,
+      });
+    }
+  }
+
   for (const axis of AXES) {
     const a = byAxis[axis];
     a.score = a.totalWeight > 0 ? Math.round(((a.totalWeight - a.failedWeight) / a.totalWeight) * 100) : null;
   }
 
-  const evaluatedAxes = AXES.filter((axis) => byAxis[axis].score != null);
-  const composite = evaluatedAxes.length
-    ? Math.round(evaluatedAxes.reduce((s, a) => s + byAxis[a].score, 0) / evaluatedAxes.length)
-    : 0;
+  // Composite: average of axes that actually have rules. If the user skipped
+  // the custom scan, drop the custom axis from the composite so it doesn't
+  // unfairly tank the grade as a permanent 0.
+  const scoredAxes = AXES.filter((a) => byAxis[a].totalWeight > 0);
+  const composite =
+    scoredAxes.length > 0
+      ? Math.round(scoredAxes.reduce((s, a) => s + byAxis[a].score, 0) / scoredAxes.length)
+      : 0;
   const grade = letterGrade(composite);
 
-  // Top 5 actions: failed rules sorted by (dollarImpact desc, weight desc)
-  const topActions = RULES.flatMap((rule) => {
-    const r = byAxis[rule.axis].results.find((x) => x.id === rule.id);
-    return r && r.status === "failed" ? [{ ...r, axis: rule.axis }] : [];
-  })
-    .sort((a, b) => b.dollarImpact - a.dollarImpact || b.weight - a.weight)
+  // Top 5 actions: failed rules sorted by (dollarImpact desc, weight desc).
+  // Includes both deterministic and custom failed rules.
+  const failed = [];
+  for (const axis of AXES) {
+    for (const r of byAxis[axis].results) {
+      if (!r.passed) failed.push({ ...r, axis });
+    }
+  }
+  const topActions = failed
+    .sort((a, b) => (b.dollarImpact || 0) - (a.dollarImpact || 0) || b.weight - a.weight)
     .slice(0, 5);
 
-  return { axes: byAxis, composite, grade, topActions, evaluatedAxes };
+  return { axes: byAxis, composite, grade, topActions, scoredAxes };
 }
 
 function missingRequiredInput(rule, features) {

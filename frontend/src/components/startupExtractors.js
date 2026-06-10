@@ -405,6 +405,7 @@ export function analyzePRD(text, filename = "PRD") {
     mentionsTrademark: /\b(trademark|tm|copyright|intellectual property|\bIP\b)/i.test(text),
     mentionsEntity: /\b(inc\.?|llc|corp\.?|corporation|delaware c-?corp)\b/i.test(text),
     excerpt: text.slice(0, 280),
+    text,
   };
 }
 

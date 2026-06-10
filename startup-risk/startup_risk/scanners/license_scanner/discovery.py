@@ -14,6 +14,7 @@ MANIFEST_NAMES = {
     "pyproject.toml",
     "poetry.lock",
     "pipfile.lock",
+    "uv.lock",
     "setup.py",
     "setup.cfg",
     "cargo.toml",

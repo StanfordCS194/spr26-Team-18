@@ -36,7 +36,7 @@ def test_cli_license_scan_requires_batch_llm_key_by_default(tmp_path, monkeypatc
     result = CliRunner().invoke(app, ["scan", str(repo), "--format", "json"])
 
     assert result.exit_code != 0
-    assert "OPENAI_API_KEY is required" in result.output
+    assert "LLM provider is not configured" in result.output
 
 
 def test_cli_license_only_excludes_static_hygiene_findings(tmp_path):

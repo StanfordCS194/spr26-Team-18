@@ -2,6 +2,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Load the repo-root .env regardless of the process CWD (e.g. uvicorn launched
+# from a subdirectory), then fall back to a .env in the CWD if present. This is
+# what makes OPENAI_API_KEY reliably available to the scanner agents.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 load_dotenv()
 
 LEGISCAN_BASE_URL = "https://api.legiscan.com/"
@@ -71,6 +75,8 @@ COMPLIANCE_QUESTIONS_PROMPT = (
 def load_config() -> dict:
     legiscan_key = os.getenv("LEGISCAN_API_KEY")
     openai_key = os.getenv("OPENAI_API_KEY")
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    gemini_key = os.getenv("GEMINI_API_KEY")
 
 
     raw_db_path = os.getenv("LEGI_BILL_DB_PATH", "~/.legi_bill/bills.db")
@@ -80,6 +86,11 @@ def load_config() -> dict:
     return {
         "legiscan_api_key": legiscan_key,
         "openai_api_key": openai_key,
+        "anthropic_api_key": anthropic_key,
+        "gemini_api_key": gemini_key,
+        "llm_provider": os.getenv("LLM_PROVIDER"),
+        "llm_model": os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or OPENAI_MODEL,
+        "openai_model": os.getenv("OPENAI_MODEL") or OPENAI_MODEL,
         "db_path": db_path,
         "turso_url": os.getenv("TURSO_DATABASE_URL"),
         "turso_token": os.getenv("TURSO_AUTH_TOKEN"),

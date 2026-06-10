@@ -54,3 +54,15 @@ def test_ingestor_marks_oversized_files(tmp_path):
     assert snapshot.files[0].text is None
     assert snapshot.files[0].is_binary is False
     assert snapshot.files[0].skipped_reason == "file exceeds max_file_bytes"
+
+
+def test_ingestor_reads_uv_lock_under_structured_file_limit(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "uv.lock").write_text("[[package]]\nname = \"requests\"\nversion = \"2.31.0\"\n", encoding="utf-8")
+
+    snapshot = RepositoryIngestor(max_file_bytes=3, structured_max_file_bytes=1_000).ingest(str(repo))
+
+    assert snapshot.files[0].path == "uv.lock"
+    assert snapshot.files[0].text is not None
+    assert snapshot.files[0].skipped_reason is None

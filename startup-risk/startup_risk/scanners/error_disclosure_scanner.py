@@ -49,8 +49,26 @@ _EXPRESS_DEV_MODE = re.compile(r"""app\.set\s*\(\s*['"]env['"]\s*,\s*['"]develop
 _WERKZEUG_DEBUG = re.compile(r"\bWERKZEUG_DEBUG_PIN\b|\bUSE_DEBUGGER\s*=\s*True\b", re.IGNORECASE)
 
 
+_COMMENT_LINE = re.compile(r"^\s*(?:#|//|/\*|\*)")
+
+
 def _is_test_file(file: FileSnapshot) -> bool:
     return file.path_role in {"tests", "examples"}
+
+
+def _is_comment_or_string(line: str) -> bool:
+    """Skip lines that are pure comments or clearly inside a string literal."""
+    stripped = line.lstrip()
+    # Python / shell / Ruby comment
+    if stripped.startswith("#"):
+        return True
+    # JS/TS/Go/Java comment
+    if stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*"):
+        return True
+    # Lines that start with a quote are likely string literal content in a multiline string
+    if stripped.startswith('"') or stripped.startswith("'"):
+        return True
+    return False
 
 
 class ErrorDisclosureScanner:
@@ -81,6 +99,8 @@ class ErrorDisclosureScanner:
     def _check_debug_true(self, file: FileSnapshot) -> list[Finding]:
         findings: list[Finding] = []
         for line_no, line in enumerate(file.text.splitlines(), start=1):  # type: ignore[union-attr]
+            if _is_comment_or_string(line):
+                continue
             if _DEBUG_TRUE.search(line) or _FLASK_DEBUG.search(line) or _WERKZEUG_DEBUG.search(line):
                 findings.append(
                     Finding(
@@ -122,6 +142,8 @@ class ErrorDisclosureScanner:
         is_js = file.extension in {".js", ".ts", ".jsx", ".tsx"}
 
         for line_no, line in enumerate(file.text.splitlines(), start=1):  # type: ignore[union-attr]
+            if _is_comment_or_string(line):
+                continue
             matched = False
             if is_py and _EXCEPTION_IN_RESPONSE_PY.search(line):
                 matched = True
@@ -169,6 +191,8 @@ class ErrorDisclosureScanner:
     def _check_traceback_in_response(self, file: FileSnapshot) -> list[Finding]:
         findings: list[Finding] = []
         for line_no, line in enumerate(file.text.splitlines(), start=1):  # type: ignore[union-attr]
+            if _is_comment_or_string(line):
+                continue
             if _TRACEBACK_IN_RESPONSE.search(line):
                 findings.append(
                     Finding(
@@ -207,6 +231,8 @@ class ErrorDisclosureScanner:
     def _check_express_dev_mode(self, file: FileSnapshot) -> list[Finding]:
         findings: list[Finding] = []
         for line_no, line in enumerate(file.text.splitlines(), start=1):  # type: ignore[union-attr]
+            if _is_comment_or_string(line):
+                continue
             if _EXPRESS_DEV_MODE.search(line):
                 findings.append(
                     Finding(

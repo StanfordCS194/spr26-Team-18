@@ -6,6 +6,7 @@ import {
   ShieldAlert, FileSearch, Package, Lock, BarChart2,
   Loader2, ExternalLink, ChevronDown, ChevronUp,
   KeyRound, Bug, RefreshCw, ShieldCheck, Sparkles,
+  Scale, GitMerge, EyeOff, Gauge,
 } from "lucide-react";
 
 // ── Industry verticals ────────────────────────────────────────────────────────
@@ -37,7 +38,11 @@ const BASE_SCANNERS = [
   { id: "pii_data_flow",   kind: "agent",   label: "PII data-flow agent",     Icon: Globe,       desc: "Traces personal data; retention, consent, encryption gaps" },
   { id: "infra_misconfig", kind: "agent",   label: "Infra misconfig agent",   Icon: Building2,   desc: "Dockerfiles, CORS, exposed ports, IaC settings" },
   { id: "vuln_exploitability", kind: "agent", label: "Vuln exploitability agent", Icon: Package,  desc: "Reachability of known CVEs in your code" },
-  { id: "custom_compliance", kind: "agent", label: "AI-tailored agent",       Icon: Sparkles,    desc: "Startup-specific rules generated from your profile" },
+  { id: "custom_compliance", kind: "agent",    label: "AI-tailored agent",           Icon: Sparkles,   desc: "Startup-specific rules generated from your profile" },
+  { id: "legal_docs",        kind: "scanner", label: "Legal document presence",     Icon: Scale,      desc: "ToS, Privacy Policy, Cookie Policy, DMCA" },
+  { id: "cicd_security",     kind: "scanner", label: "CI/CD pipeline security",     Icon: GitMerge,   desc: "Unpinned actions, pull_request_target, write-all" },
+  { id: "error_disclosure",  kind: "scanner", label: "Error & info disclosure",     Icon: EyeOff,     desc: "Debug mode, exception details in responses" },
+  { id: "rate_limiting",     kind: "scanner", label: "Rate limiting on auth",       Icon: Gauge,      desc: "Brute-force protection on login & register routes" },
 ];
 
 // Industry-specific scanners shown as aspirational (coming soon) in the scanner preview
@@ -66,6 +71,10 @@ const SCANNER_LABELS = {
   infra_misconfig: "Infra Misconfig Agent",
   vuln_exploitability: "Vuln Exploitability Agent",
   custom_compliance: "AI-Tailored Agent",
+  legal_docs:        "Legal Docs",
+  cicd_security:     "CI/CD Security",
+  error_disclosure:  "Error Disclosure",
+  rate_limiting:     "Rate Limiting",
 };
 
 // ── Severity config ───────────────────────────────────────────────────────────
@@ -121,7 +130,8 @@ function FindingCard({ finding }) {
   const [open, setOpen] = useState(false);
   const sev = SEV[finding.severity] ?? SEV.info;
   const SevIcon = sev.Icon;
-  const scannerLabel = SCANNER_LABELS[finding.scanner_id] ?? finding.scanner_id;
+  const scannerId = finding.scanner_id ?? finding.scanner;
+  const scannerLabel = SCANNER_LABELS[scannerId] ?? scannerId;
 
   return (
     <div className={`rounded-2xl border ${sev.border} ${sev.bg} overflow-hidden`}>
@@ -258,7 +268,7 @@ function ResultsView({ results, repoUrl, industry, onboardingProfile, onReset, o
     .filter((g) => g.items.length > 0);
 
   // Which scanners produced at least one finding
-  const activeScanners = [...new Set(findings.map((f) => f.scanner_id).filter(Boolean))];
+  const activeScanners = [...new Set(findings.map((f) => f.scanner_id ?? f.scanner).filter(Boolean))];
 
   return (
     <div className="space-y-8">
@@ -422,6 +432,7 @@ function WorkspaceReady({ profile, onNavigate }) {
 
 export default function RepoScanner({
   onScanComplete,
+  onScanCleared,
   onViewIssues,
   onboardingProfile = null,
   autoStartToken = null,
@@ -450,7 +461,11 @@ export default function RepoScanner({
     let i = 0;
     const interval = setInterval(() => {
       if (i < BASE_SCANNERS.length) {
-        setScanLog((prev) => [...prev, BASE_SCANNERS[i].id]);
+        // Capture the id now — the setState updater must not close over the
+        // mutable `i`, which advances to BASE_SCANNERS.length and would make
+        // BASE_SCANNERS[i] undefined when React runs the updater later.
+        const scannerId = BASE_SCANNERS[i].id;
+        setScanLog((prev) => [...prev, scannerId]);
         i++;
       } else {
         clearInterval(interval);
@@ -553,6 +568,7 @@ export default function RepoScanner({
     setResults(null);
     setScanLog([]);
     setApiError("");
+    onScanCleared?.();
   }
 
   // ── Form ──────────────────────────────────────────────────────────────────

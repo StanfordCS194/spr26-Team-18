@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Sidebar from "./components/Sidebar";
 import HomePage from "./components/HomePage";
 import PublicLanding from "./components/PublicLanding";
@@ -63,6 +64,7 @@ export default function App() {
   }
 
   function handleSignIn() {
+    setLatestRepoScan(null);
     setScannerHandoff(null);
     unlockDashboard({ kind: "signin", createdAt: Date.now(), profile: null }, "scanner");
   }
@@ -74,6 +76,7 @@ export default function App() {
       repoUrl: profile.repoUrl.trim(),
     };
     const nextSession = { kind: "signup", createdAt: Date.now(), profile: normalized };
+    setLatestRepoScan(null);
     setScannerHandoff({ profile: normalized, token: Date.now(), autoStart: true });
     unlockDashboard(nextSession, "scanner");
   }
@@ -82,6 +85,7 @@ export default function App() {
     clearSession();
     setSession(null);
     setScannerHandoff(null);
+    setLatestRepoScan(null);
     setActiveTab("home");
     window.history.replaceState(null, "", window.location.pathname);
   }
@@ -94,6 +98,11 @@ export default function App() {
       localStorage.removeItem("startupGrader.companyContext.v1");
     } catch {}
     setStartupRecommendations(null);
+    setLatestRepoScan(null);
+  }
+
+  function handleScanCleared() {
+    setLatestRepoScan(null);
   }
 
   if (!session) {
@@ -116,47 +125,49 @@ export default function App() {
         onLogoClick={handleLogout}
       />
       <main className="ml-64 px-10 pb-20 pt-10">
-        <div
-          className={`mx-auto animate-fade-in ${activeTab === "issues" ? "max-w-[1420px]" : "max-w-[1080px]"}`}
-          key={activeTab}
-        >
-          {activeTab === "home" && (
-            <HomePage
-              onTabChange={changeTab}
-              profile={session.profile}
-              latestRepoScan={latestRepoScan}
-              recommendations={startupRecommendations}
-            />
-          )}
-          {activeTab === "scanner" && (
-            <RepoScanner
-              onScanComplete={setLatestRepoScan}
-              onViewIssues={() => changeTab("issues")}
-              onboardingProfile={scannerHandoff?.profile || session.profile}
-              autoStartToken={scannerHandoff?.autoStart ? scannerHandoff.token : null}
-              onAutoStartConsumed={() => setScannerHandoff(null)}
-              onNavigate={changeTab}
-            />
-          )}
-          {activeTab === "issues" && (
-            <IssueCodeReview
-              scan={latestRepoScan}
-              onGoToScanner={() => changeTab("scanner")}
-            />
-          )}
-          {activeTab === "benchmark" && <Benchmark />}
-          {activeTab === "startup" && (
-            <StartupGrader onRecommendationsUpdated={setStartupRecommendations} />
-          )}
-          {activeTab === "legal" && <LegalIntelligence />}
-          {activeTab === "recs" && (
-            <ActiveRecommendations
-              snapshot={startupRecommendations}
-              onGoToStartup={() => changeTab("startup")}
-            />
-          )}
-          {activeTab === "financial" && <FinancialCompliance />}
-        </div>
+        <ErrorBoundary key={activeTab}>
+          <div
+            className={`mx-auto animate-fade-in ${activeTab === "issues" ? "max-w-[1420px]" : "max-w-[1080px]"}`}
+          >
+            {activeTab === "home" && (
+              <HomePage
+                onTabChange={changeTab}
+                profile={session.profile}
+                latestRepoScan={latestRepoScan}
+                recommendations={startupRecommendations}
+              />
+            )}
+            {activeTab === "scanner" && (
+              <RepoScanner
+                onScanComplete={setLatestRepoScan}
+                onViewIssues={() => changeTab("issues")}
+                onScanCleared={handleScanCleared}
+                onboardingProfile={scannerHandoff?.profile || session.profile}
+                autoStartToken={scannerHandoff?.autoStart ? scannerHandoff.token : null}
+                onAutoStartConsumed={() => setScannerHandoff(null)}
+                onNavigate={changeTab}
+              />
+            )}
+            {activeTab === "issues" && (
+              <IssueCodeReview
+                scan={latestRepoScan}
+                onGoToScanner={() => changeTab("scanner")}
+              />
+            )}
+            {activeTab === "benchmark" && <Benchmark />}
+            {activeTab === "startup" && (
+              <StartupGrader onRecommendationsUpdated={setStartupRecommendations} />
+            )}
+            {activeTab === "legal" && <LegalIntelligence />}
+            {activeTab === "recs" && (
+              <ActiveRecommendations
+                snapshot={startupRecommendations}
+                onGoToStartup={() => changeTab("startup")}
+              />
+            )}
+            {activeTab === "financial" && <FinancialCompliance />}
+          </div>
+        </ErrorBoundary>
       </main>
     </div>
   );

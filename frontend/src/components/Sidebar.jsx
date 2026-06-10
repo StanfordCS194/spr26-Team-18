@@ -2,8 +2,6 @@ import {
   Bug,
   LayoutDashboard,
   Landmark,
-  Scale,
-  Sparkles,
   MessageCircle,
   ShieldAlert,
   FlaskConical,
@@ -17,8 +15,6 @@ const TABS = [
   { id: "scanner",   label: "Repo Scanner",    Icon: ShieldAlert },
   { id: "issues",    label: "Issues",          Icon: Bug },
   { id: "benchmark", label: "Benchmark",       Icon: FlaskConical },
-  { id: "startup",   label: "Startup Health",  Icon: Sparkles },
-  { id: "legal",     label: "Legal",           Icon: Scale },
   { id: "recs",      label: "Recommendations", Icon: MessageCircle },
   { id: "financial", label: "Financial",       Icon: Landmark },
 ];

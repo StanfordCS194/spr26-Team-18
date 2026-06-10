@@ -116,7 +116,8 @@ function FindingCard({ finding }) {
   const [open, setOpen] = useState(false);
   const sev = SEV[finding.severity] ?? SEV.info;
   const SevIcon = sev.Icon;
-  const scannerLabel = SCANNER_LABELS[finding.scanner_id] ?? finding.scanner_id;
+  const scannerId = finding.scanner_id ?? finding.scanner;
+  const scannerLabel = SCANNER_LABELS[scannerId] ?? scannerId;
 
   return (
     <div className={`rounded-2xl border ${sev.border} ${sev.bg} overflow-hidden`}>
@@ -253,7 +254,7 @@ function ResultsView({ results, repoUrl, industry, onboardingProfile, onReset, o
     .filter((g) => g.items.length > 0);
 
   // Which scanners produced at least one finding
-  const activeScanners = [...new Set(findings.map((f) => f.scanner_id).filter(Boolean))];
+  const activeScanners = [...new Set(findings.map((f) => f.scanner_id ?? f.scanner).filter(Boolean))];
 
   return (
     <div className="space-y-8">

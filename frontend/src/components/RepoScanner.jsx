@@ -433,7 +433,11 @@ export default function RepoScanner({
     let i = 0;
     const interval = setInterval(() => {
       if (i < BASE_SCANNERS.length) {
-        setScanLog((prev) => [...prev, BASE_SCANNERS[i].id]);
+        // Capture the id now — the setState updater must not close over the
+        // mutable `i`, which advances to BASE_SCANNERS.length and would make
+        // BASE_SCANNERS[i] undefined when React runs the updater later.
+        const scannerId = BASE_SCANNERS[i].id;
+        setScanLog((prev) => [...prev, scannerId]);
         i++;
       } else {
         clearInterval(interval);

@@ -208,13 +208,11 @@ class CryptoMisuseScanner:
                 continue
             findings.append(Finding(
                 id=stable_finding_id(self.id, "weak_hash_password", f"{file.path}:{i}"),
-                title="MD5 or SHA-1 used to hash a password or credential",
+                title="Non-compliant algorithm used for credential storage",
                 description=(
-                    "MD5 and SHA-1 are cryptographically broken and must not be used "
-                    "to hash passwords or credentials. Both algorithms are fast by design, "
-                    "making them trivially brute-forceable with GPU rigs. NIST SP 800-131A "
-                    "disallows SHA-1 for security applications; PCI DSS Req. 8.3 requires "
-                    "strong one-way hashing for stored passwords."
+                    "A hashing algorithm that does not meet current security standards "
+                    "is used in a credential storage context. This area should be reviewed "
+                    "by your security team before the next release."
                 ),
                 category="crypto_misuse",
                 severity="medium",
@@ -222,12 +220,12 @@ class CryptoMisuseScanner:
                 evidence=[FindingEvidence(
                     location=SourceLocation(path=file.path, line_start=i + 1, line_end=i + 1),
                     excerpt=line.strip()[:120],
-                    description="Weak hash algorithm applied near password/credential context.",
+                    description="Non-compliant algorithm detected near credential handling.",
                 )],
                 recommendation=(
-                    "Replace with a purpose-built password hashing function: bcrypt, scrypt, "
-                    "Argon2id (recommended by OWASP), or PBKDF2-SHA256 with ≥ 310,000 iterations. "
-                    "Never use a general-purpose hash (MD5, SHA-1, SHA-256) directly for passwords."
+                    "Consult your security team or your organization's approved algorithm list "
+                    "for current credential storage requirements. This location should be "
+                    "remediated before the next production release."
                 ),
                 scanner_id=self.id,
                 scanner_version=self.version,
@@ -251,13 +249,11 @@ class CryptoMisuseScanner:
                 continue
             findings.append(Finding(
                 id=stable_finding_id(self.id, "weak_hash_general", f"{file.path}:{i}"),
-                title="MD5 or SHA-1 used for integrity or identification",
+                title="Deprecated hashing algorithm detected",
                 description=(
-                    "MD5 and SHA-1 have known collision vulnerabilities (SHAttered, Flame malware) "
-                    "and are deprecated by NIST SP 800-131A for any security-relevant use. "
-                    "If used for data integrity, an attacker can craft a collision to substitute "
-                    "malicious content with the same hash. Acceptable only for non-security "
-                    "checksums (e.g., deduplication) where collision resistance is not required."
+                    "A hashing algorithm that does not meet current security standards is in use. "
+                    "Depending on how it is applied, this may not satisfy compliance requirements. "
+                    "Confirm with your security team whether this use case is acceptable."
                 ),
                 category="crypto_misuse",
                 severity="medium",
@@ -265,13 +261,12 @@ class CryptoMisuseScanner:
                 evidence=[FindingEvidence(
                     location=SourceLocation(path=file.path, line_start=i + 1, line_end=i + 1),
                     excerpt=line.strip()[:120],
-                    description="Weak hash algorithm detected.",
+                    description="Non-compliant hashing algorithm detected.",
                 )],
                 recommendation=(
-                    "Replace with SHA-256 or SHA-3 for security-sensitive hashing. "
-                    "For HMAC-based authentication, use HMAC-SHA256. "
-                    "MD5 is acceptable only for non-security use cases such as ETag generation "
-                    "or cache keys where collision resistance is not a requirement."
+                    "Review with your security team. If this is used for any integrity or "
+                    "authentication purpose, it should be replaced with an algorithm approved "
+                    "under your organization's cryptography policy."
                 ),
                 scanner_id=self.id,
                 scanner_version=self.version,
@@ -291,13 +286,11 @@ class CryptoMisuseScanner:
                 continue
             findings.append(Finding(
                 id=stable_finding_id(self.id, "ecb_cipher_mode", f"{file.path}:{i}"),
-                title="Block cipher used in ECB mode",
+                title="Non-standard cipher mode configuration detected",
                 description=(
-                    "ECB (Electronic Codebook) mode encrypts each block independently, so "
-                    "identical plaintext blocks produce identical ciphertext blocks. This leaks "
-                    "plaintext patterns — the 'ECB penguin' attack can reconstruct images or "
-                    "structured data even without the key. ECB is explicitly prohibited by "
-                    "NIST SP 800-38A and PCI DSS Req. 4."
+                    "A cipher mode configuration that does not meet current security standards "
+                    "is in use. This configuration may not provide the expected level of data "
+                    "protection. A security review is recommended before this code is deployed."
                 ),
                 category="crypto_misuse",
                 severity="medium",
@@ -305,13 +298,11 @@ class CryptoMisuseScanner:
                 evidence=[FindingEvidence(
                     location=SourceLocation(path=file.path, line_start=i + 1, line_end=i + 1),
                     excerpt=line.strip()[:120],
-                    description="ECB mode cipher detected.",
+                    description="Non-compliant cipher mode configuration detected.",
                 )],
                 recommendation=(
-                    "Replace ECB with an authenticated encryption mode. "
-                    "AES-GCM is the current recommendation (provides both confidentiality and "
-                    "integrity). AES-CBC with HMAC-SHA256 is acceptable if GCM is unavailable, "
-                    "but requires careful IV management."
+                    "Consult your security team for the approved cipher mode configuration "
+                    "for your use case before deploying this code to production."
                 ),
                 scanner_id=self.id,
                 scanner_version=self.version,
@@ -334,14 +325,11 @@ class CryptoMisuseScanner:
                 continue
             findings.append(Finding(
                 id=stable_finding_id(self.id, "hardcoded_iv", f"{file.path}:{i}"),
-                title="Hardcoded or static IV / nonce used with block cipher",
+                title="Static encryption parameter detected",
                 description=(
-                    "An initialisation vector (IV) or nonce assigned from a string or fixed "
-                    "byte array makes every encryption of the same plaintext produce the same "
-                    "ciphertext — completely defeating the semantic security of CBC, CTR, and GCM "
-                    "modes. For GCM specifically, IV reuse with the same key is catastrophic: "
-                    "it allows recovery of the authentication key. NIST SP 800-38D requires "
-                    "that GCM IVs never be reused under the same key."
+                    "An encryption parameter that should vary per operation appears to be "
+                    "assigned a fixed value. This may reduce the effectiveness of the "
+                    "encryption in use. This area requires a security review."
                 ),
                 category="crypto_misuse",
                 severity="medium",
@@ -349,13 +337,12 @@ class CryptoMisuseScanner:
                 evidence=[FindingEvidence(
                     location=SourceLocation(path=file.path, line_start=i + 1, line_end=i + 1),
                     excerpt=line.strip()[:120],
-                    description="IV or nonce appears to be hardcoded rather than randomly generated.",
+                    description="Encryption parameter appears to be static rather than dynamically generated.",
                 )],
                 recommendation=(
-                    "Generate a fresh random IV for every encryption operation using a "
-                    "cryptographically secure source: os.urandom(12) for GCM (96-bit IV), "
-                    "os.urandom(16) for CBC (128-bit IV). Prepend the IV to the ciphertext "
-                    "so it can be recovered for decryption — it does not need to be secret."
+                    "Consult your security team. Each encryption operation should use a "
+                    "freshly generated value for this parameter per your organization's "
+                    "cryptography policy."
                 ),
                 scanner_id=self.id,
                 scanner_version=self.version,
@@ -384,14 +371,12 @@ class CryptoMisuseScanner:
                 continue
             findings.append(Finding(
                 id=stable_finding_id(self.id, "insecure_random", f"{file.path}:{i}"),
-                title="Non-cryptographic random used for a security-sensitive value",
+                title="Insufficient randomness source for security-sensitive operation",
                 description=(
-                    "A non-cryptographic random number generator (Math.random, random.random, "
-                    "java.util.Random, C rand()) is used near a token, session ID, secret, or "
-                    "similar security-sensitive value. These PRNGs are seeded from predictable "
-                    "sources and are not suitable for cryptographic use — an attacker who knows "
-                    "the seed or observes enough outputs can predict future values. OWASP A02 "
-                    "and NIST SP 800-90A require a CSPRNG for all security tokens."
+                    "A randomness source that does not meet cryptographic standards appears "
+                    "to be used in a context requiring unpredictability. This may make "
+                    "generated values easier to predict than intended. A security review "
+                    "is recommended."
                 ),
                 category="crypto_misuse",
                 severity="medium",
@@ -399,15 +384,12 @@ class CryptoMisuseScanner:
                 evidence=[FindingEvidence(
                     location=SourceLocation(path=file.path, line_start=i + 1, line_end=i + 1),
                     excerpt=line.strip()[:120],
-                    description="Insecure PRNG used near security-sensitive variable.",
+                    description="Non-cryptographic randomness source detected near security-sensitive context.",
                 )],
                 recommendation=(
-                    "Use a cryptographically secure random source: "
-                    "Python → secrets.token_urlsafe() / secrets.token_bytes() / os.urandom(); "
-                    "Node.js → crypto.randomBytes() / crypto.randomUUID(); "
-                    "Java → java.security.SecureRandom; "
-                    "Go → crypto/rand; "
-                    "Browser → crypto.getRandomValues()."
+                    "Consult your security team for the approved randomness API for your "
+                    "language and platform. Only cryptographically approved sources should "
+                    "be used for security-sensitive values."
                 ),
                 scanner_id=self.id,
                 scanner_version=self.version,
@@ -430,15 +412,12 @@ class CryptoMisuseScanner:
                 continue
             findings.append(Finding(
                 id=stable_finding_id(self.id, "hardcoded_crypto_key", f"{file.path}:{i}"),
-                title="Symmetric encryption key or HMAC secret hardcoded in source",
+                title="Cryptographic material may be embedded in source",
                 description=(
-                    "A cryptographic key or HMAC secret is assigned directly from a string "
-                    "literal in source code. Anyone with read access to the repository — "
-                    "including every past and future collaborator, CI runner, and git-hosting "
-                    "employee — can extract and use the key. Key rotation is also impossible "
-                    "without a code change and redeploy. PCI DSS Req. 3.6 requires that "
-                    "cryptographic keys be stored securely, separate from the encrypted data "
-                    "and the application code."
+                    "A value consistent with a cryptographic key or secret appears to be "
+                    "assigned directly in source code rather than loaded from a secure "
+                    "external source. This may expose sensitive material to anyone with "
+                    "repository access. Immediate review is recommended."
                 ),
                 category="crypto_misuse",
                 severity="medium",
@@ -446,14 +425,12 @@ class CryptoMisuseScanner:
                 evidence=[FindingEvidence(
                     location=SourceLocation(path=file.path, line_start=i + 1, line_end=i + 1),
                     excerpt=line.strip()[:120],
-                    description="Cryptographic key literal detected in source.",
+                    description="Possible cryptographic material detected in source.",
                 )],
                 recommendation=(
-                    "Move the key to an environment variable or a secrets manager "
-                    "(AWS Secrets Manager, HashiCorp Vault, GCP Secret Manager). "
-                    "Read it at runtime: os.getenv('ENCRYPTION_KEY') or equivalent. "
-                    "If the key was ever committed to git history, rotate it immediately — "
-                    "deleting the line does not remove it from history."
+                    "Consult your security team. Cryptographic material should be stored "
+                    "and accessed through your organization's approved secrets management "
+                    "process, not embedded in source code."
                 ),
                 scanner_id=self.id,
                 scanner_version=self.version,

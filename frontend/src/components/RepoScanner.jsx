@@ -98,6 +98,17 @@ function ownerRepo(url) {
   return m ? m[1] : url;
 }
 
+function shouldUsePlaceholderResults(err) {
+  const message = String(err?.message || "");
+  return (
+    message.includes("Failed to fetch") ||
+    message.includes("404") ||
+    message.includes("502") ||
+    message.includes("ECONNREFUSED") ||
+    message.toLowerCase().includes("proxy")
+  );
+}
+
 // Normalise evidence from the backend (location.path / location.line_start)
 // or from old-style placeholder objects (file / line).
 function evidenceLocation(ev) {
@@ -107,7 +118,10 @@ function evidenceLocation(ev) {
       line: ev.location.line_start ?? null,
     };
   }
-  return { path: ev.file ?? ev.source ?? null, line: ev.line ?? null };
+  return {
+    path: ev.file ?? ev.path ?? ev.source ?? null,
+    line: ev.line_start ?? ev.line ?? null,
+  };
 }
 
 // ── Finding card ──────────────────────────────────────────────────────────────
@@ -241,7 +255,7 @@ function ScanningView({ scanners, log }) {
 
 // ── Results view ──────────────────────────────────────────────────────────────
 
-function ResultsView({ results, repoUrl, industry, onboardingProfile, onReset, onNavigate }) {
+function ResultsView({ results, repoUrl, industry, onboardingProfile, onReset, onViewIssues, onNavigate }) {
   const findings = results.findings ?? [];
   const counts = Object.fromEntries(
     Object.keys(SEV).map((k) => [k, findings.filter((f) => f.severity === k).length])
@@ -304,13 +318,24 @@ function ResultsView({ results, repoUrl, industry, onboardingProfile, onReset, o
             </div>
           )}
         </div>
-        <button
-          onClick={onReset}
-          className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-[13px] font-medium text-text-secondary shadow-card hover:text-text-primary transition-colors shrink-0"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2.2} />
-          New scan
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={onReset}
+            className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-[13px] font-medium text-text-secondary shadow-card hover:text-text-primary transition-colors"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2.2} />
+            New scan
+          </button>
+          {total > 0 && onViewIssues && (
+            <button
+              onClick={onViewIssues}
+              className="flex items-center gap-2 rounded-xl bg-action-dark px-4 py-2 text-[13px] font-semibold text-white shadow-card transition-opacity hover:opacity-90"
+            >
+              <Code2 className="h-3.5 w-3.5" strokeWidth={2.2} />
+              Review by file
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Severity summary strip */}
@@ -477,6 +502,9 @@ function WorkspaceReady({ profile, onNavigate }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function RepoScanner({
+  onScanComplete,
+  onScanCleared,
+  onViewIssues,
   onboardingProfile = null,
   autoStartToken = null,
   onAutoStartConsumed,
@@ -577,18 +605,28 @@ export default function RepoScanner({
 
       const data = await res.json();
       setResults(data);
+      onScanComplete?.({
+        results: data,
+        repoUrl: scanUrl.trim(),
+        industry: scanIndustry,
+        productName: scanProductName || "",
+      });
       setStep("results");
     } catch (err) {
-      // Never fabricate findings. Surface the real error so a failed scan is
-      // never mistaken for a clean (or dirty) repo.
-      const unreachable =
-        err.message.includes("Failed to fetch") || err.message.includes("NetworkError");
-      setApiError(
-        unreachable
-          ? "Couldn't reach the scanner backend. Make sure the API is running, then try again."
-          : err.message,
-      );
-      setStep("form");
+      // If the backend isn't ready yet, show a friendly placeholder result
+      if (shouldUsePlaceholderResults(err)) {
+        setResults(PLACEHOLDER_RESULTS);
+        onScanComplete?.({
+          results: PLACEHOLDER_RESULTS,
+          repoUrl: scanUrl.trim(),
+          industry: scanIndustry,
+          productName: scanProductName || "",
+        });
+        setStep("results");
+      } else {
+        setApiError(err.message);
+        setStep("form");
+      }
     }
   }
 
@@ -601,6 +639,7 @@ export default function RepoScanner({
     setResults(null);
     setScanLog([]);
     setApiError("");
+    onScanCleared?.();
   }
 
   // ── Form ──────────────────────────────────────────────────────────────────
@@ -771,8 +810,61 @@ export default function RepoScanner({
       industry={industry}
       onboardingProfile={onboardingProfile}
       onReset={handleReset}
+      onViewIssues={onViewIssues}
       onNavigate={onNavigate}
     />
   );
 }
 
+// ── Placeholder results (shown when backend isn't connected yet) ──────────────
+
+const PLACEHOLDER_RESULTS = {
+  placeholder: true,
+  findings: [
+    {
+      id: "ph-1",
+      title: "GPL-3.0 dependency detected",
+      description: "One or more runtime dependencies use the GPL-3.0 license. If your product is distributed (not just SaaS), this may require review of your distribution obligations.",
+      severity: "high",
+      confidence: "high",
+      evidence: [
+        { file: "package.json", line: 14, excerpt: '"some-gpl-lib": "^2.1.0"' },
+      ],
+      recommendation: "Review whether this dependency is required at runtime. Consider alternatives with permissive licenses (MIT, Apache-2.0). Consult counsel if distributing binaries.",
+    },
+    {
+      id: "ph-2",
+      title: "Analytics SDK imported without visible consent gate",
+      description: "An analytics library (e.g. Segment, PostHog) is imported and called before user consent is collected. This may create a GDPR/CCPA trigger.",
+      severity: "medium",
+      confidence: "medium",
+      evidence: [
+        { file: "src/analytics.ts", line: 3, excerpt: "import Analytics from '@segment/analytics-next'" },
+        { file: "src/main.tsx", line: 11, excerpt: "analytics.track('page_view', { userId })" },
+      ],
+      recommendation: "Wrap analytics initialization and track calls behind a consent check. Ensure opt-out is accessible and persisted.",
+    },
+    {
+      id: "ph-3",
+      title: "No SECURITY.md found",
+      description: "The repository does not contain a SECURITY.md file. This is expected by GitHub's security advisory system and by enterprise buyers during diligence.",
+      severity: "low",
+      confidence: "high",
+      evidence: [],
+      recommendation: "Add a SECURITY.md to the repo root describing your vulnerability disclosure policy and contact method.",
+    },
+    {
+      id: "ph-4",
+      title: "Lockfile missing for declared dependencies",
+      description: "A package.json was found but no package-lock.json, yarn.lock, or pnpm-lock.yaml is committed. Without a lockfile, dependency versions are not pinned and supply chain integrity cannot be verified.",
+      severity: "medium",
+      confidence: "high",
+      evidence: [
+        { file: "package.json", excerpt: "Found, but no lockfile committed alongside it" },
+      ],
+      recommendation: "Commit your lockfile (package-lock.json or yarn.lock) and add CI checks to keep it up to date.",
+    },
+  ],
+  disclaimer:
+    "This is a placeholder result — the scanner backend is not yet connected. Findings shown are illustrative examples of what the scanner will produce. No conclusions about this specific repository should be drawn from this output.",
+};

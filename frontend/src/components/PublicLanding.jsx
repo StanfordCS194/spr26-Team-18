@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
   Building2,
+  ChevronDown,
   CheckCircle2,
   DollarSign,
   GitBranch,
@@ -48,7 +49,38 @@ function useCountUp(target, duration = 1800, delay = 0) {
   return count;
 }
 
-function HeroIllustration() {
+const SCENARIOS = {
+  devtools: {
+    label: "DevTools",
+    repo: "cli/core",
+    grade: "A-",
+    saved: "$47,000",
+    risk: "License risk",
+    scan: "OSS scan",
+    accent: "#0052ff",
+  },
+  health: {
+    label: "Health",
+    repo: "patient-portal",
+    grade: "B+",
+    saved: "$62,000",
+    risk: "PHI review",
+    scan: "HIPAA pass",
+    accent: "#00C853",
+  },
+  fintech: {
+    label: "Fintech",
+    repo: "checkout-api",
+    grade: "A",
+    saved: "$58,000",
+    risk: "PCI check",
+    scan: "Controls",
+    accent: "#FF6B00",
+  },
+};
+
+function HeroIllustration({ scenario = "devtools" }) {
+  const active = SCENARIOS[scenario] ?? SCENARIOS.devtools;
   return (
     <div className="relative h-[280px] w-[340px] flex-shrink-0">
       <div className="absolute right-0 top-0 w-[200px] rounded-2xl border-2 border-[#0052ff]/20 bg-white p-4 shadow-card animate-float">
@@ -61,8 +93,12 @@ function HeroIllustration() {
           <div className="h-2 w-4/5 rounded bg-[#d4e0ff]" />
           <div className="h-2 w-3/4 rounded bg-[#d4e0ff]" />
         </div>
+        <div className="mt-3 rounded-xl border border-border bg-chip-alt px-3 py-2">
+          <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">Repo</div>
+          <div className="mt-0.5 truncate font-mono text-[12px] font-bold text-text-primary">{active.repo}</div>
+        </div>
         <div className="mt-4 flex items-center justify-between">
-          <span className="text-[11px] font-bold text-[#0052ff]">Grade: A</span>
+          <span className="text-[11px] font-bold text-[#0052ff]">Grade: {active.grade}</span>
           <div className="rounded-full bg-[#ccfce7] px-2 py-0.5 text-[10px] font-bold text-[#00874a]">
             +92%
           </div>
@@ -73,7 +109,7 @@ function HeroIllustration() {
         <div className="text-[10px] font-semibold uppercase tracking-wider text-[#7a90b8]">
           Legal fees saved
         </div>
-        <div className="text-[22px] font-bold text-[#FF6B00]">$47,000</div>
+        <div className="text-[22px] font-bold text-[#FF6B00]">{active.saved}</div>
       </div>
 
       <div className="absolute left-4 top-16 flex items-center gap-1.5 rounded-full border border-[#ccfce7] bg-white px-3 py-1.5 shadow-card">
@@ -83,7 +119,11 @@ function HeroIllustration() {
 
       <div className="absolute bottom-[72px] right-4 flex items-center gap-1.5 rounded-full border border-[#dbeafe] bg-white px-3 py-1.5 shadow-card">
         <Zap className="h-3.5 w-3.5 text-[#0052ff]" strokeWidth={2.5} />
-        <span className="text-[11px] font-semibold text-[#050a14]">30 sec</span>
+        <span className="text-[11px] font-semibold text-[#050a14]">{active.scan}</span>
+      </div>
+
+      <div className="absolute left-16 top-[132px] rounded-full border bg-white px-3 py-1.5 text-[11px] font-bold shadow-card" style={{ borderColor: `${active.accent}40`, color: active.accent }}>
+        {active.risk}
       </div>
 
       <div className="absolute right-[-8px] top-[100px] flex gap-0.5">
@@ -92,6 +132,68 @@ function HeroIllustration() {
         ))}
       </div>
     </div>
+  );
+}
+
+function ScenarioSwitcher({ scenario, onChange }) {
+  return (
+    <div className="animate-slide-up rounded-2xl border border-border bg-white/70 p-3 shadow-card" style={{ animationDelay: "0.24s" }}>
+      <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-text-muted">
+        <ScanSearch className="h-3.5 w-3.5" strokeWidth={2.2} />
+        Try a startup profile
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {Object.entries(SCENARIOS).map(([id, item]) => (
+          <button
+            key={id}
+            onClick={() => onChange(id)}
+            className={`rounded-xl border px-3 py-2 text-left transition-all ${
+              scenario === id
+                ? "border-[#0052ff] bg-[#0052ff]/10 shadow-card"
+                : "border-border bg-card hover:-translate-y-0.5 hover:border-action-dark/50"
+            }`}
+          >
+            <div className="text-[12px] font-bold leading-tight text-text-primary">{item.label}</div>
+            <div className="mt-0.5 text-[10px] leading-tight text-text-muted">{item.risk}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LandingPulse({ scenario }) {
+  const active = SCENARIOS[scenario] ?? SCENARIOS.devtools;
+  const events = [
+    ["Repo queued", active.repo],
+    ["Scanner routing", active.label],
+    ["Signal found", active.risk],
+    ["Workspace ready", active.grade],
+  ];
+  return (
+    <section className="animate-slide-up overflow-hidden rounded-2xl border border-border bg-white p-4 shadow-card" style={{ animationDelay: "0.28s" }}>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#0052ff]">Live demo pulse</div>
+          <div className="mt-0.5 text-[13px] text-text-secondary">Switch profiles above and watch the scanner path update.</div>
+        </div>
+        <div className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-700">
+          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          Ready
+        </div>
+      </div>
+      <div className="grid grid-cols-4 gap-3">
+        {events.map(([label, value], index) => (
+          <div key={label} className="rounded-xl border border-border bg-chip-alt px-4 py-3">
+            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-text-muted">
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-[10px] text-action-dark">{index + 1}</span>
+              {label}
+            </div>
+            <div className="mt-2 truncate text-[13px] font-bold text-text-primary">{value}</div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -127,10 +229,33 @@ const INDUSTRIES = [
   { id: "other", label: "Other / General" },
 ];
 
-const STAGES = ["idea", "pre-seed", "seed", "series A+"];
-const CUSTOMERS = ["consumer", "SMB", "mid-market", "enterprise", "developer"];
-const SENSITIVE_DATA = ["none", "PII", "health (HIPAA)", "financial", "minors"];
-const GTM = ["self-serve", "PLG", "sales-led", "marketplace", "API"];
+const STAGES = [
+  { id: "idea", label: "Idea" },
+  { id: "pre-seed", label: "Pre-Seed" },
+  { id: "seed", label: "Seed" },
+  { id: "series-a", label: "Series A+" },
+];
+const CUSTOMERS = [
+  { id: "consumer", label: "Consumers" },
+  { id: "smb", label: "SMB" },
+  { id: "mid-market", label: "Mid-Market" },
+  { id: "enterprise", label: "Enterprise" },
+  { id: "developer", label: "Developers" },
+];
+const SENSITIVE_DATA = [
+  { id: "none", label: "None" },
+  { id: "pii", label: "PII" },
+  { id: "health-data", label: "Health Data" },
+  { id: "financial", label: "Financial Data" },
+  { id: "minors", label: "Minors" },
+];
+const GTM = [
+  { id: "self-serve", label: "Self-Serve" },
+  { id: "plg", label: "PLG" },
+  { id: "sales-led", label: "Sales-Led" },
+  { id: "marketplace", label: "Marketplace" },
+  { id: "api", label: "API" },
+];
 
 const EMPTY_PROFILE = {
   companyName: "",
@@ -148,7 +273,7 @@ const DEMO_PROFILE = {
   stage: "seed",
   customers: "developer",
   sensitiveData: "none",
-  gtm: "PLG",
+  gtm: "plg",
   repoUrl: "https://github.com/octocat/Hello-World",
 };
 
@@ -186,16 +311,33 @@ function validGithubUrl(value) {
   return /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/.test(value.trim());
 }
 
-function industryLabel(id) {
-  return INDUSTRIES.find((item) => item.id === id)?.label || id || "-";
+function displayValue(key, value) {
+  if (!value) return "-";
+  const optionsByKey = {
+    industry: INDUSTRIES,
+    stage: STAGES,
+    customers: CUSTOMERS,
+    sensitiveData: SENSITIVE_DATA,
+    gtm: GTM,
+  };
+  return optionsByKey[key]?.find((item) => item.id === value)?.label || value;
 }
 
 export default function PublicLanding({ onSignIn, onSignUpComplete }) {
   const [mode, setMode] = useState("landing");
   const [profile, setProfile] = useState(EMPTY_PROFILE);
+  const [scenario, setScenario] = useState("devtools");
+  const howItWorksRef = useRef(null);
   const savings = useCountUp(47_000, 2000, 300);
   const repos = useCountUp(4_821, 1600, 500);
   const hours = useCountUp(350, 1400, 400);
+
+  useLayoutEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [mode]);
 
   function openSignUp(nextProfile = EMPTY_PROFILE) {
     setProfile(nextProfile);
@@ -214,11 +356,11 @@ export default function PublicLanding({ onSignIn, onSignUpComplete }) {
   }
 
   return (
-    <main className="min-h-screen bg-page">
+    <main className="min-h-screen overflow-x-hidden scroll-smooth bg-page">
       <header className="mx-auto flex max-w-[1180px] items-center justify-between px-8 py-6">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0052ff]">
-            <img src={logo} alt="" className="h-7 w-7 rounded object-contain" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-white shadow-card">
+            <img src={logo} alt="" className="h-7 w-7 object-contain" />
           </div>
           <span className="text-[19px] font-bold tracking-tight text-text-primary">Legi-Bill</span>
         </div>
@@ -240,7 +382,7 @@ export default function PublicLanding({ onSignIn, onSignUpComplete }) {
         </nav>
       </header>
 
-      <div className="mx-auto max-w-[1180px] space-y-20 px-8 pb-16 pt-4">
+      <div className="mx-auto max-w-[1180px] space-y-20 px-8 pb-40 pt-4 lg:pb-56">
         <section className="pt-4">
           <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
             <div className="max-w-[590px] space-y-6">
@@ -303,13 +445,27 @@ export default function PublicLanding({ onSignIn, onSignUpComplete }) {
                   Try demo repo
                 </button>
               </div>
+
+              <ScenarioSwitcher scenario={scenario} onChange={setScenario} />
             </div>
 
             <div className="animate-slide-up hidden lg:flex" style={{ animationDelay: "0.1s" }}>
-              <HeroIllustration />
+              <HeroIllustration scenario={scenario} />
             </div>
           </div>
         </section>
+
+        <LandingPulse scenario={scenario} />
+
+        <div className="flex justify-center">
+          <button
+            onClick={() => howItWorksRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className="inline-flex items-center gap-2 rounded-full border border-border bg-white/80 px-4 py-2 text-[12px] font-semibold text-text-secondary shadow-card transition-all hover:-translate-y-0.5 hover:text-text-primary"
+          >
+            See the demo flow
+            <ChevronDown className="h-3.5 w-3.5" strokeWidth={2.3} />
+          </button>
+        </div>
 
         <div
           className="animate-slide-up -mx-2 flex items-center gap-6 overflow-hidden rounded-2xl border-2 border-[#d4e0ff] bg-white px-6 py-4"
@@ -328,7 +484,7 @@ export default function PublicLanding({ onSignIn, onSignUpComplete }) {
           ))}
         </div>
 
-        <section className="space-y-6">
+        <section ref={howItWorksRef} className="scroll-mt-8 space-y-6">
           <div className="animate-slide-up" style={{ animationDelay: "0.1s" }}>
             <div className="mb-1 text-[12px] font-bold uppercase tracking-[0.2em] text-[#0052ff]">
               How it works
@@ -425,7 +581,7 @@ const QUESTION_STEPS = [
     title: "What stage are you at?",
     body: "A seed-stage startup and an enterprise vendor should not get the same advice.",
     type: "select",
-    options: STAGES.map((value) => ({ id: value, label: value })),
+    options: STAGES,
     validate: (value) => (value ? null : "Choose a stage."),
   },
   {
@@ -435,7 +591,7 @@ const QUESTION_STEPS = [
     title: "Who do you sell to?",
     body: "This helps frame privacy, procurement, and enterprise readiness findings.",
     type: "select",
-    options: CUSTOMERS.map((value) => ({ id: value, label: value })),
+    options: CUSTOMERS,
     validate: (value) => (value ? null : "Choose a customer type."),
   },
   {
@@ -445,7 +601,7 @@ const QUESTION_STEPS = [
     title: "What sensitive data do you handle?",
     body: "Pick the highest-risk category that applies. You can refine this later.",
     type: "select",
-    options: SENSITIVE_DATA.map((value) => ({ id: value, label: value })),
+    options: SENSITIVE_DATA,
     validate: (value) => (value ? null : "Choose a data profile."),
   },
   {
@@ -455,7 +611,7 @@ const QUESTION_STEPS = [
     title: "How do you go to market?",
     body: "Sales motion changes the compliance work that matters this week.",
     type: "select",
-    options: GTM.map((value) => ({ id: value, label: value })),
+    options: GTM,
     validate: (value) => (value ? null : "Choose a go-to-market motion."),
   },
   {
@@ -519,35 +675,37 @@ function OnboardingFlow({ profile, setProfile, onBack, onStartScan }) {
   }
 
   return (
-    <main className="min-h-screen bg-page px-8 py-8">
-      <div className="mx-auto max-w-[1120px]">
-        <button
-          onClick={onBack}
-          className="mb-6 inline-flex items-center gap-2 text-[13px] font-semibold text-text-secondary hover:text-text-primary"
-        >
-          <ArrowLeft className="h-4 w-4" strokeWidth={2.2} />
-          Back to landing
-        </button>
+    <main className="h-screen overflow-hidden bg-page px-4 py-4 lg:px-6 lg:py-5">
+      <div className="mx-auto flex h-full max-w-[1120px] flex-col">
+        <div>
+          <button
+            onClick={onBack}
+            className="mb-3 inline-flex items-center gap-2 text-[13px] font-semibold text-text-secondary hover:text-text-primary"
+          >
+            <ArrowLeft className="h-4 w-4" strokeWidth={2.2} />
+            Back to landing
+          </button>
+        </div>
 
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_330px]">
-          <section className="rounded-3xl border border-border bg-card p-7 shadow-card">
-            <div className="mb-7 flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[1fr_280px] lg:grid-cols-[1fr_300px]">
+          <section className="flex min-h-0 flex-col rounded-3xl border border-border bg-card p-4 shadow-card sm:p-5">
+            <div className="mb-3 flex items-center justify-between gap-3">
               <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-text-muted">Interactive sign up</div>
-                <h1 className="mt-1 text-[30px] font-bold tracking-tight text-text-primary">
-                  Build your scanner profile.
+                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-text-muted">Startup Setup</div>
+                <h1 className="mt-0.5 text-[22px] font-bold tracking-tight text-text-primary">
+                  Build your scanner profile
                 </h1>
               </div>
               <button
                 onClick={useDemoProfile}
-                className="inline-flex items-center justify-center gap-2 rounded-full border border-border bg-chip-alt px-4 py-2 text-[13px] font-semibold text-text-secondary hover:text-text-primary"
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full border border-border bg-chip-alt px-3 py-2 text-[12px] font-semibold text-text-secondary hover:text-text-primary"
               >
                 <Play className="h-3.5 w-3.5" strokeWidth={2.2} />
                 Try demo repo
               </button>
             </div>
 
-            <div className="mb-7">
+            <div className="mb-3">
               <div className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">
                 <span>Step {Math.min(step + 1, FINAL_STEP + 1)} of {FINAL_STEP + 1}</span>
                 <span>{completeCount}/{QUESTION_STEPS.length} answered</span>
@@ -561,19 +719,22 @@ function OnboardingFlow({ profile, setProfile, onBack, onStartScan }) {
             </div>
 
             <CompletedChips profile={profile} activeStep={step} />
+            <ScannerEnergy step={step} completeCount={completeCount} />
 
-            {step < FINAL_STEP ? (
-              <QuestionCard
-                item={current}
-                value={profile[current.key] || ""}
-                error={errors[current.key]}
-                onChange={(value) => setField(current.key, value)}
-              />
-            ) : (
-              <ReadySummary profile={profile} />
-            )}
+            <div className="min-h-0">
+              {step < FINAL_STEP ? (
+                <QuestionCard
+                  item={current}
+                  value={profile[current.key] || ""}
+                  error={errors[current.key]}
+                  onChange={(value) => setField(current.key, value)}
+                />
+              ) : (
+                <ReadySummary profile={profile} />
+              )}
+            </div>
 
-            <div className="mt-8 flex items-center justify-between">
+            <div className="mt-3 flex items-center justify-between">
               <button
                 onClick={() => setStep((value) => Math.max(0, value - 1))}
                 disabled={step === 0}
@@ -609,6 +770,32 @@ function OnboardingFlow({ profile, setProfile, onBack, onStartScan }) {
   );
 }
 
+function ScannerEnergy({ step, completeCount }) {
+  const pct = Math.round((completeCount / QUESTION_STEPS.length) * 100);
+  const labels = ["Context", "Risk routing", "Customer lens", "Data profile", "Launch motion"];
+  return (
+    <div className="mb-3 rounded-2xl border border-[#0052ff]/15 bg-white px-3 py-2 shadow-card">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#0052ff]">Scanner charge</div>
+          <div className="mt-0.5 text-[12px] font-semibold text-text-primary">
+            {step >= FINAL_STEP ? "Profile locked. Ready to scan." : `${labels[Math.min(step, labels.length - 1)]} is powering up.`}
+          </div>
+        </div>
+        <div className="rounded-full border border-border bg-chip-alt px-3 py-1 text-[11px] font-bold text-text-secondary">
+          {pct}% ready
+        </div>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-chip-alt">
+        <div
+          className="h-full rounded-full bg-blue-gradient transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function isAnswered(profile, item) {
   const value = profile[item.key] || "";
   return !item.validate(value);
@@ -621,7 +808,7 @@ function labelFor(item, value) {
 
 function CompletedChips({ profile, activeStep }) {
   return (
-    <div className="mb-6 flex flex-wrap gap-2">
+    <div className="mb-3 grid grid-cols-7 gap-1.5">
       {QUESTION_STEPS.map((item, index) => {
         const value = profile[item.key] || "";
         const done = isAnswered(profile, item);
@@ -629,7 +816,7 @@ function CompletedChips({ profile, activeStep }) {
           <span
             key={item.key}
             className={
-              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors " +
+              "inline-flex min-w-0 items-center justify-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold transition-colors " +
               (done
                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                 : index === activeStep
@@ -639,7 +826,7 @@ function CompletedChips({ profile, activeStep }) {
           >
             {done && <CheckCircle2 className="h-3 w-3" strokeWidth={2.3} />}
             {item.short}
-            {done && <span className="max-w-[120px] truncate opacity-80">· {labelFor(item, value)}</span>}
+            {done && <span className="hidden max-w-[120px] truncate opacity-80 lg:inline">· {labelFor(item, value)}</span>}
           </span>
         );
       })}
@@ -650,19 +837,19 @@ function CompletedChips({ profile, activeStep }) {
 function QuestionCard({ item, value, error, onChange }) {
   const Icon = item.icon || SparkleDot;
   return (
-    <div className="rounded-3xl border border-border-muted bg-chip-alt p-6 animate-fade-in">
-      <div className="flex items-start gap-4">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-card shadow-card">
+    <div className="rounded-3xl border border-border-muted bg-chip-alt p-3.5 animate-fade-in">
+      <div className="flex items-start gap-3">
+        <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-card shadow-card sm:flex">
           <Icon className="h-5 w-5 text-action-dark" strokeWidth={2.2} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-[11px] uppercase tracking-[0.18em] text-text-muted">{item.eyebrow}</div>
-          <h2 className="mt-1 text-[28px] font-bold leading-tight tracking-tight text-text-primary">{item.title}</h2>
-          <p className="mt-2 max-w-[560px] text-[14px] leading-relaxed text-text-secondary">{item.body}</p>
+          <h2 className="mt-0.5 text-[21px] font-bold leading-tight tracking-tight text-text-primary">{item.title}</h2>
+          <p className="mt-1 max-w-[560px] text-[12px] leading-relaxed text-text-secondary">{item.body}</p>
 
-          <div className="mt-6">
+          <div className="mt-3">
             {item.type === "select" ? (
-              <SelectField
+              <OptionPicker
                 label={item.title}
                 value={value}
                 error={error}
@@ -682,8 +869,8 @@ function QuestionCard({ item, value, error, onChange }) {
           </div>
 
           {value && !error && (
-            <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[12px] font-semibold text-emerald-700">
-              <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2.4} />
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700">
+              <CheckCircle2 className="h-3 w-3" strokeWidth={2.4} />
               Locked in: {labelFor(item, value)}
             </div>
           )}
@@ -715,30 +902,89 @@ function TextField({ label, value, error, icon: Icon, placeholder, onChange }) {
   );
 }
 
-function SelectField({ label, value, error, options, onChange }) {
+function OptionPicker({ label, value, error, options, onChange }) {
+  const selected = options.find((option) => option.id === value);
   return (
-    <label className="block space-y-2">
+    <div className="space-y-2">
       <span className="sr-only">{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-[14px] text-text-primary shadow-card outline-none focus:border-action-dark"
-      >
-        <option value="">Select one</option>
-        {options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {options.map((option) => {
+          const isSelected = option.id === value;
+          return (
+            <button
+              type="button"
+              key={option.id}
+              onClick={() => onChange(option.id)}
+              className={`group flex min-h-[54px] items-center gap-2 rounded-2xl border p-2.5 text-left shadow-card transition-all sm:min-h-[62px] sm:gap-2.5 ${
+                isSelected
+                  ? "border-[#0052ff] bg-[#0052ff]/10 ring-4 ring-[#0052ff]/10"
+                  : "border-border bg-card hover:-translate-y-0.5 hover:border-action-dark/60 hover:shadow-card-hover"
+              }`}
+              aria-pressed={isSelected}
+            >
+              <span
+                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ${
+                  isSelected
+                    ? "border-[#0052ff] bg-[#0052ff] text-white"
+                    : "border-border bg-chip-alt text-transparent group-hover:border-action-dark/50"
+                }`}
+              >
+                <CheckCircle2 className="h-3 w-3 sm:h-3.5 sm:w-3.5" strokeWidth={2.6} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block whitespace-normal break-words text-[12px] font-bold leading-snug text-text-primary sm:text-[13px]">
+                  {option.label}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {selected && (
+        <div className="rounded-xl border border-border bg-white/70 px-3 py-2 text-[11px] leading-relaxed text-text-secondary">
+          <span className="font-semibold text-text-primary">{selected.label}:</span> {optionHint(selected)}
+        </div>
+      )}
       {error && <span className="text-[11px] text-red-600">{error}</span>}
-    </label>
+    </div>
   );
+}
+
+function optionHint(option) {
+  const hints = {
+    health: "HIPAA, PHI, patient workflows, and clinical diligence.",
+    fintech: "PCI, transaction risk, financial data, and vendor review.",
+    saas: "Privacy, consent, analytics, and consumer data obligations.",
+    edtech: "Student data, minors, FERPA, and COPPA-style checks.",
+    devtools: "Open-source licenses, supply chain, and developer distribution.",
+    ai: "Training data, model behavior, and AI data-use controls.",
+    enterprise: "SOC 2 readiness, access control, procurement, and audit trails.",
+    other: "General security, privacy, and repository hygiene.",
+    idea: "Pre-product or prototype stage.",
+    "pre-seed": "Early team, early users, and light process.",
+    seed: "Customer traction with growing diligence needs.",
+    "series-a": "Scaling operations, sales, and compliance obligations.",
+    consumer: "Individuals, app users, or public self-serve customers.",
+    smb: "Small business buyers with lighter procurement.",
+    "mid-market": "Larger customers and more structured review cycles.",
+    developer: "Technical users, SDKs, CLIs, APIs, or open-source users.",
+    none: "No sensitive data expected in normal use.",
+    pii: "Names, emails, identifiers, profiles, or account data.",
+    "health-data": "Health, patient, clinical, or insurance information.",
+    financial: "Payments, banking, accounting, payroll, or tax data.",
+    minors: "Children, students, age-gated users, or education records.",
+    "self-serve": "Customers sign up and buy without sales support.",
+    plg: "Product-led growth with usage driving expansion.",
+    "sales-led": "Sales calls, procurement, security review, and contracts.",
+    marketplace: "Distribution through app stores, cloud, or partner channels.",
+    api: "API-first product, integrations, or developer platform.",
+  };
+  return hints[option.id] || hints[option.label] || "Recommended scanner context.";
 }
 
 function ProfilePreview({ profile, completeCount }) {
   return (
-    <aside className="rounded-3xl border border-border bg-card p-5 shadow-card lg:sticky lg:top-8 lg:self-start">
+    <aside className="hidden rounded-3xl border border-border bg-card p-4 shadow-card md:block lg:sticky lg:top-8 lg:self-start">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <div className="text-[10px] uppercase tracking-[0.16em] text-text-muted">Live profile</div>
@@ -756,23 +1002,37 @@ function ProfilePreview({ profile, completeCount }) {
 }
 
 function ReadySummary({ profile }) {
+  const summaryRows = [
+    ["Company", profile.companyName],
+    ["Industry", displayValue("industry", profile.industry)],
+    ["Stage", displayValue("stage", profile.stage)],
+    ["Customer", displayValue("customers", profile.customers)],
+    ["Data", displayValue("sensitiveData", profile.sensitiveData)],
+    ["Repo", profile.repoUrl],
+  ];
   return (
-    <div className="rounded-3xl border border-emerald-200 bg-emerald-50/70 p-6 animate-fade-in">
-      <div className="mb-4 flex items-center gap-3">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-emerald-700 shadow-card">
-          <CheckCircle2 className="h-6 w-6" strokeWidth={2.4} />
+    <div className="rounded-3xl border border-emerald-200 bg-emerald-50/70 p-4 animate-fade-in">
+      <div className="mb-3 flex items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-emerald-700 shadow-card">
+          <CheckCircle2 className="h-5 w-5" strokeWidth={2.4} />
         </div>
         <div>
           <div className="text-[11px] uppercase tracking-[0.18em] text-emerald-700">Ready to scan</div>
-          <h2 className="text-[27px] font-bold tracking-tight text-text-primary">
+          <h2 className="text-[22px] font-bold tracking-tight text-text-primary">
             {profile.companyName || "Your company"} is queued up.
           </h2>
         </div>
       </div>
-      <ProfileRows profile={profile} />
-      <p className="mt-4 text-[12px] leading-relaxed text-text-secondary">
-        Start scan will unlock the workspace, run the repo scanner, and keep these answers in this
-        browser session for the rest of the demo.
+      <div className="grid grid-cols-2 gap-2">
+        {summaryRows.map(([label, value]) => (
+          <div key={label} className="rounded-xl border border-emerald-200 bg-white/80 px-3 py-2">
+            <div className="text-[9px] uppercase tracking-[0.14em] text-emerald-700">{label}</div>
+            <div className="mt-0.5 truncate text-[12px] font-semibold text-text-primary">{value || "-"}</div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-[12px] leading-relaxed text-text-secondary">
+        Start scan unlocks the workspace and keeps this profile in the demo session.
       </p>
     </div>
   );
@@ -781,11 +1041,11 @@ function ReadySummary({ profile }) {
 function ProfileRows({ profile, compact = false }) {
   const rows = [
     ["Company", profile.companyName],
-    ["Industry", industryLabel(profile.industry)],
-    ["Stage", profile.stage],
-    ["Customer", profile.customers],
-    ["Sensitive data", profile.sensitiveData],
-    ["GTM", profile.gtm],
+    ["Industry", displayValue("industry", profile.industry)],
+    ["Stage", displayValue("stage", profile.stage)],
+    ["Customer", displayValue("customers", profile.customers)],
+    ["Sensitive data", displayValue("sensitiveData", profile.sensitiveData)],
+    ["GTM", displayValue("gtm", profile.gtm)],
     ["Repo", profile.repoUrl],
   ];
   return (

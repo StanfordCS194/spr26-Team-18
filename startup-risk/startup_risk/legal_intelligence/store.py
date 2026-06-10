@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -116,13 +117,22 @@ class LegalIntelligenceStore:
         for line in path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
-            rows.append(json.loads(line))
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
         return rows
 
     def _write_jsonl(self, path: Path, rows: list[dict]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         content = "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows)
-        path.write_text(content, encoding="utf-8")
+        tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{id(rows)}.tmp")
+        try:
+            tmp_path.write_text(content, encoding="utf-8")
+            os.replace(tmp_path, path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
 
 def _authority_hash(authority: LegalAuthority) -> str:

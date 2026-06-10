@@ -107,7 +107,10 @@ function evidenceLocation(ev) {
       line: ev.location.line_start ?? null,
     };
   }
-  return { path: ev.file ?? ev.source ?? null, line: ev.line ?? null };
+  return {
+    path: ev.file ?? ev.path ?? ev.source ?? null,
+    line: ev.line_start ?? ev.line ?? null,
+  };
 }
 
 // ── Finding card ──────────────────────────────────────────────────────────────
@@ -272,7 +275,7 @@ function ScanningView({ scanners, log }) {
 
 // ── Results view ──────────────────────────────────────────────────────────────
 
-function ResultsView({ results, repoUrl, industry, onboardingProfile, onReset, onNavigate }) {
+function ResultsView({ results, repoUrl, industry, onboardingProfile, onReset, onViewIssues, onNavigate }) {
   const findings = results.findings ?? [];
   const counts = Object.fromEntries(
     Object.keys(SEV).map((k) => [k, findings.filter((f) => f.severity === k).length])
@@ -335,13 +338,24 @@ function ResultsView({ results, repoUrl, industry, onboardingProfile, onReset, o
             </div>
           )}
         </div>
-        <button
-          onClick={onReset}
-          className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-[13px] font-medium text-text-secondary shadow-card hover:text-text-primary transition-colors shrink-0"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2.2} />
-          New scan
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={onReset}
+            className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-[13px] font-medium text-text-secondary shadow-card hover:text-text-primary transition-colors"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2.2} />
+            New scan
+          </button>
+          {total > 0 && onViewIssues && (
+            <button
+              onClick={onViewIssues}
+              className="flex items-center gap-2 rounded-xl bg-action-dark px-4 py-2 text-[13px] font-semibold text-white shadow-card transition-opacity hover:opacity-90"
+            >
+              <Code2 className="h-3.5 w-3.5" strokeWidth={2.2} />
+              Review by file
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Severity summary strip */}
@@ -508,6 +522,9 @@ function WorkspaceReady({ profile, onNavigate }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function RepoScanner({
+  onScanComplete,
+  onScanCleared,
+  onViewIssues,
   onboardingProfile = null,
   autoStartToken = null,
   onAutoStartConsumed,
@@ -608,17 +625,15 @@ export default function RepoScanner({
 
       const data = await res.json();
       setResults(data);
+      onScanComplete?.({
+        results: data,
+        repoUrl: scanUrl.trim(),
+        industry: scanIndustry,
+        productName: scanProductName || "",
+      });
       setStep("results");
     } catch (err) {
-      // Never fabricate findings. Surface the real error so a failed scan is
-      // never mistaken for a clean (or dirty) repo.
-      const unreachable =
-        err.message.includes("Failed to fetch") || err.message.includes("NetworkError");
-      setApiError(
-        unreachable
-          ? "Couldn't reach the scanner backend. Make sure the API is running, then try again."
-          : err.message,
-      );
+      setApiError(err.message);
       setStep("form");
     }
   }
@@ -632,6 +647,7 @@ export default function RepoScanner({
     setResults(null);
     setScanLog([]);
     setApiError("");
+    onScanCleared?.();
   }
 
   // ── Form ──────────────────────────────────────────────────────────────────
@@ -802,6 +818,7 @@ export default function RepoScanner({
       industry={industry}
       onboardingProfile={onboardingProfile}
       onReset={handleReset}
+      onViewIssues={onViewIssues}
       onNavigate={onNavigate}
     />
   );

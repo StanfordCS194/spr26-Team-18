@@ -14,7 +14,7 @@ from pypdf import PdfReader
 from app.ranking import rank_bills
 from .config import load_config
 from .grader import grade_company
-from .legal_intelligence import detect_industry, calculate_savings
+from .legal_intelligence import CA_BILLS_INTRODUCED, detect_industry, calculate_savings
 from .llm import LLMConfigError, LLMProviderCapabilityError, get_chat_client
 from .storage import init_db, get_all_bills, get_bill_with_summary_and_questions
 
@@ -505,6 +505,13 @@ class LegalIntelligenceSourceSetupRequest(BaseModel):
     include_bulk: bool = True
 
 
+class LegalIntelligenceAutoRequest(BaseModel):
+    company_text: str | None = None
+    industry: str | None = "tech"
+    state: str | None = None
+    profile: dict = Field(default_factory=dict)
+
+
 class LegalIntelligenceDistillRequest(BaseModel):
     llm_provider: str | None = None
     llm_model: str | None = None
@@ -611,6 +618,75 @@ def legal_intelligence_source_setup(req: LegalIntelligenceSourceSetupRequest):
         "public_source_count": len(public_presets),
         "bulk_source_count": len(bulk_presets),
         "sources": [source.model_dump(mode="json") for source in store.load_source_queries()],
+    }
+
+
+@app.post("/api/legal-intelligence/auto")
+def legal_intelligence_auto(req: LegalIntelligenceAutoRequest):
+    """Prepare legal intelligence and return demo-ready insights without user input."""
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import (
+        bulk_source_presets_for_industry,
+        fetch_public_legal_authorities,
+        public_source_presets_for_industry,
+    )
+
+    industry = (req.industry or req.profile.get("industry") or "tech").strip().lower()
+    company_text = _auto_legal_company_text(req.company_text, req.profile, industry)
+    store = _legal_intelligence_store()
+
+    public_presets = public_source_presets_for_industry(industry)
+    bulk_presets = bulk_source_presets_for_industry(industry)
+    for source_preset in public_presets:
+        store.append_source_query(source_preset.to_source_query())
+    for bulk_preset in bulk_presets:
+        store.append_source_query(bulk_preset.to_source_query())
+
+    authorities = store.load_authorities()
+    fetched_errors: dict[str, str] = {}
+    fetched_count = 0
+    if len(authorities) < 3:
+        for preset in public_presets[:4]:
+            try:
+                fetched = fetch_public_legal_authorities(
+                    source=preset.source,
+                    query=preset.query,
+                    limit=min(preset.limit, 3),
+                    topic=preset.topic,
+                    jurisdiction=preset.jurisdiction,
+                )
+                fetched = [
+                    authority.model_copy(
+                        update={
+                            "metadata": {
+                                **authority.metadata,
+                                "source_query_id": preset.to_source_query().id,
+                                "industry_tags": list(preset.industry_tags),
+                            }
+                        }
+                    )
+                    for authority in fetched
+                ]
+                fetched_count += len(fetched)
+                store.upsert_authorities(fetched)
+            except Exception as exc:
+                fetched_errors[preset.id] = str(exc)
+        authorities = store.load_authorities()
+
+    rules = store.load_rules()
+    enabled_rules = [rule for rule in rules if rule.enabled and rule.review_status != "rejected"]
+    insights = _legal_insights_from_rules(enabled_rules, authorities) or _default_legal_insights(industry)
+    savings = _automatic_legal_savings(company_text, req.state, len(authorities), len(enabled_rules))
+
+    return {
+        "status": store.status(),
+        "configured_sources": [source.model_dump(mode="json") for source in store.load_source_queries()],
+        "authorities": [_authority_preview(authority) for authority in authorities[:12]],
+        "rules": [rule.model_dump(mode="json") for rule in enabled_rules[:12]],
+        "insights": insights,
+        "savings": savings,
+        "fetched_count": fetched_count,
+        "fetch_errors": fetched_errors,
     }
 
 
@@ -1407,6 +1483,154 @@ def legal_savings(
         state=state,
         hourly_rate_override=hourly_rate,
     )
+
+
+def _auto_legal_company_text(company_text: str | None, profile: dict, industry: str) -> str:
+    if company_text and company_text.strip():
+        return company_text.strip()
+    parts = [
+        profile.get("companyName") or profile.get("product_name") or "Demo startup",
+        industry,
+        profile.get("stage"),
+        profile.get("customers"),
+        profile.get("sensitiveData") or profile.get("sensitive_data"),
+        profile.get("gtm"),
+        profile.get("repoUrl"),
+    ]
+    text = " ".join(str(part) for part in parts if part)
+    return text or "Technology startup handling customer data and repository compliance."
+
+
+def _automatic_legal_savings(company_text: str, state: str | None, authority_count: int, rule_count: int) -> dict:
+    industry = detect_industry(company_text or "")
+    matched_count = max(1, min(CA_BILLS_INTRODUCED, (authority_count * 2) + rule_count + 25))
+    return calculate_savings(
+        matched_bill_count=matched_count,
+        industry=industry,
+        state=state,
+        hourly_rate_override=None,
+    )
+
+
+def _legal_insights_from_rules(rules: list, authorities: list) -> list[dict]:
+    insights: list[dict] = []
+    for rule in rules[:6]:
+        citation = rule.citations[0] if rule.citations else None
+        insights.append(
+            {
+                "title": rule.title,
+                "category": rule.category,
+                "confidence": rule.confidence,
+                "why_it_matters": rule.finding_rationale or rule.legal_basis,
+                "scanner_signal": rule.risk_signal,
+                "recommendation": rule.recommendation,
+                "citation": citation.model_dump(mode="json") if citation else None,
+                "source_interpretation": True,
+            }
+        )
+    if insights:
+        return insights
+
+    for authority in authorities[:6]:
+        insights.append(
+            {
+                "title": authority.title,
+                "category": authority.topic,
+                "confidence": "low",
+                "why_it_matters": (
+                    f"This {authority.authority_type.replace('_', ' ')} is relevant to "
+                    f"{authority.topic.replace('_', ' ')}. It should inform scanner prioritization, "
+                    "but repo evidence still determines whether a finding is shown."
+                ),
+                "scanner_signal": authority.topic.replace("_", " "),
+                "recommendation": "Review matching repo evidence against this source-backed legal context.",
+                "citation": {
+                    "title": authority.title,
+                    "citation": authority.citation,
+                    "url": authority.url,
+                    "authority_type": authority.authority_type,
+                    "jurisdiction": authority.jurisdiction,
+                },
+                "source_interpretation": True,
+            }
+        )
+    return insights
+
+
+def _authority_preview(authority) -> dict:
+    return {
+        "source_id": authority.source_id,
+        "title": authority.title,
+        "authority_type": authority.authority_type,
+        "jurisdiction": authority.jurisdiction,
+        "topic": authority.topic,
+        "citation": authority.citation,
+        "url": authority.url,
+        "effective_date": authority.effective_date.isoformat() if authority.effective_date else None,
+        "metadata": authority.metadata,
+    }
+
+
+def _default_legal_insights(industry: str) -> list[dict]:
+    normalized = (industry or "tech").lower()
+    if normalized in {"finance", "fintech"}:
+        return [
+            {
+                "title": "Financial data controls should be prioritized in scanner results",
+                "category": "financial_compliance",
+                "confidence": "medium",
+                "why_it_matters": "Fintech and finance profiles are exposed to consumer-finance, security, privacy, and disclosure obligations. Scanner findings involving payment data, access controls, and audit trails should be elevated.",
+                "scanner_signal": "payment flows, customer financial data, audit logs, KYC/AML language, access control gaps",
+                "recommendation": "Prioritize remediation for repository evidence involving payment data, financial records, weak authentication, or missing incident-response documentation.",
+                "citation": {"title": "Configured sources: CFPB, SEC, FTC, eCFR Titles 12 and 17", "citation": "Public legal source presets", "authority_type": "agency_guidance", "jurisdiction": "US"},
+                "source_interpretation": True,
+            },
+            {
+                "title": "Privacy disclosures should line up with data collection in code",
+                "category": "privacy",
+                "confidence": "medium",
+                "why_it_matters": "Financial products commonly process sensitive customer data. Legal context should cause privacy-policy and consent gaps to rank higher when scanner evidence shows analytics, tracking, or personal-data collection.",
+                "scanner_signal": "analytics SDKs, tracking calls, user identifiers, privacy policy absence",
+                "recommendation": "Match collection points in code to public notices, consent controls, retention language, and opt-out paths.",
+                "citation": {"title": "Configured sources: FTC and CFPB privacy/security feeds", "citation": "Public legal source presets", "authority_type": "agency_guidance", "jurisdiction": "US"},
+                "source_interpretation": True,
+            },
+        ]
+    if normalized == "healthcare":
+        return [
+            {
+                "title": "Health-data handling should raise severity for security and privacy gaps",
+                "category": "healthcare",
+                "confidence": "medium",
+                "why_it_matters": "Healthcare profiles can involve PHI, patient workflows, or FDA/HHS-adjacent obligations. Scanner evidence involving health identifiers, access controls, logs, and data sharing should receive stronger legal context.",
+                "scanner_signal": "patient data, PHI references, access control gaps, missing security policy, health integrations",
+                "recommendation": "Treat health-data findings as priority remediation items and document safeguards, retention, breach response, and vendor controls.",
+                "citation": {"title": "Configured sources: HHS OCR and eCFR Titles 21 and 45", "citation": "Public legal source presets", "authority_type": "agency_guidance", "jurisdiction": "US"},
+                "source_interpretation": True,
+            }
+        ]
+    return [
+        {
+            "title": "Privacy and security evidence should drive legal-risk prioritization",
+            "category": "privacy",
+            "confidence": "medium",
+            "why_it_matters": "Technology companies commonly collect customer, usage, and account data. Scanner findings involving tracking, personal data, secrets, weak authentication, or missing disclosure documents should be framed with privacy and consumer-protection context.",
+            "scanner_signal": "analytics SDKs, personal data collection, exposed secrets, missing SECURITY.md or privacy policy",
+            "recommendation": "Prioritize findings that connect code evidence to customer data handling, security controls, disclosure gaps, and consent/opt-out expectations.",
+            "citation": {"title": "Configured sources: FTC, Federal Register, Regulations.gov, eCFR Title 16", "citation": "Public legal source presets", "authority_type": "agency_guidance", "jurisdiction": "US"},
+            "source_interpretation": True,
+        },
+        {
+            "title": "AI and data-governance signals should stay separate from deterministic repo evidence",
+            "category": "ai_data_governance",
+            "confidence": "medium",
+            "why_it_matters": "Legal intelligence should guide scanner priorities without overstating certainty. AI/data-governance findings should clearly distinguish source-backed interpretation from concrete repository evidence.",
+            "scanner_signal": "training data references, model prompts, automated decisioning, data-retention gaps",
+            "recommendation": "Show repo evidence first, then attach legal context with citations and confidence labels.",
+            "citation": {"title": "Configured sources: Federal Register AI/privacy and FTC data-security feeds", "citation": "Public legal source presets", "authority_type": "agency_guidance", "jurisdiction": "US"},
+            "source_interpretation": True,
+        },
+    ]
 
 
 # ── /api/scan ─────────────────────────────────────────────────────────────────

@@ -1,9 +1,9 @@
 import {
-  Home,
-  Scale,
-  Sparkles,
+  Bug,
+  LayoutDashboard,
+  Landmark,
   MessageCircle,
-  Gauge,
+  Scale,
   ShieldAlert,
   FlaskConical,
   LogOut,
@@ -12,27 +12,30 @@ import {
 import logo from "../assets/logo.png";
 
 const TABS = [
-  { id: "home",      label: "Home",            Icon: Home },
+  { id: "home",      label: "Dashboard",       Icon: LayoutDashboard },
   { id: "scanner",   label: "Repo Scanner",    Icon: ShieldAlert },
+  { id: "issues",    label: "Issues",          Icon: Bug },
   { id: "benchmark", label: "Benchmark",       Icon: FlaskConical },
-  { id: "startup",   label: "Startup Health",  Icon: Sparkles },
   { id: "legal",     label: "Legal",           Icon: Scale },
   { id: "recs",      label: "Recommendations", Icon: MessageCircle },
-  { id: "financial", label: "Financial",       Icon: Gauge },
+  { id: "financial", label: "Financial",       Icon: Landmark },
 ];
 
-export default function Sidebar({ activeTab, onTabChange, profile, onLogout, onResetDemo }) {
+export default function Sidebar({ activeTab, onTabChange, profile, onLogout, onResetDemo, onLogoClick }) {
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col bg-sidebar-gradient border-r border-white/10">
       {/* Logo */}
-      <div className="flex items-center gap-3 px-6 pt-7 pb-7">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#0052ff]">
-          <img src={logo} alt="" className="h-6 w-6 rounded object-contain" />
+      <button
+        onClick={onLogoClick}
+        className="group flex items-center gap-3 px-6 pb-7 pt-7 text-left"
+      >
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white shadow-card transition-colors group-hover:border-white/40">
+          <img src={logo} alt="" className="h-7 w-7 object-contain" />
         </div>
         <span className="text-[18px] font-bold tracking-tight text-white">
           Legi-Bill
         </span>
-      </div>
+      </button>
 
       <nav className="flex flex-1 flex-col gap-1 px-3">
         {TABS.map(({ id, label, Icon }) => {

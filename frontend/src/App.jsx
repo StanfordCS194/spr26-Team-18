@@ -4,13 +4,14 @@ import Sidebar from "./components/Sidebar";
 import HomePage from "./components/HomePage";
 import PublicLanding from "./components/PublicLanding";
 import RepoScanner from "./components/RepoScanner";
+import IssueCodeReview from "./components/IssueCodeReview";
 import Benchmark from "./components/Benchmark";
 import StartupGrader from "./components/StartupGrader";
 import ActiveRecommendations from "./components/ActiveRecommendations";
 import LegalIntelligence from "./components/LegalIntelligence";
 import FinancialCompliance from "./components/FinancialCompliance";
 
-const TAB_IDS = ["home", "scanner", "benchmark", "startup", "legal", "recs", "financial"];
+const TAB_IDS = ["home", "scanner", "issues", "benchmark", "startup", "legal", "recs", "financial"];
 const SESSION_KEY = "legiBill.demoSession.v1";
 
 function tabFromHash() {
@@ -39,6 +40,7 @@ function clearSession() {
 export default function App() {
   const [activeTab, setActiveTab] = useState(tabFromHash);
   const [startupRecommendations, setStartupRecommendations] = useState(null);
+  const [latestRepoScan, setLatestRepoScan] = useState(null);
   const [session, setSession] = useState(loadSession);
   const [scannerHandoff, setScannerHandoff] = useState(null);
 
@@ -62,6 +64,7 @@ export default function App() {
   }
 
   function handleSignIn() {
+    setLatestRepoScan(null);
     setScannerHandoff(null);
     unlockDashboard({ kind: "signin", createdAt: Date.now(), profile: null }, "scanner");
   }
@@ -73,6 +76,7 @@ export default function App() {
       repoUrl: profile.repoUrl.trim(),
     };
     const nextSession = { kind: "signup", createdAt: Date.now(), profile: normalized };
+    setLatestRepoScan(null);
     setScannerHandoff({ profile: normalized, token: Date.now(), autoStart: true });
     unlockDashboard(nextSession, "scanner");
   }
@@ -81,6 +85,7 @@ export default function App() {
     clearSession();
     setSession(null);
     setScannerHandoff(null);
+    setLatestRepoScan(null);
     setActiveTab("home");
     window.history.replaceState(null, "", window.location.pathname);
   }
@@ -93,6 +98,11 @@ export default function App() {
       localStorage.removeItem("startupGrader.companyContext.v1");
     } catch {}
     setStartupRecommendations(null);
+    setLatestRepoScan(null);
+  }
+
+  function handleScanCleared() {
+    setLatestRepoScan(null);
   }
 
   if (!session) {
@@ -112,32 +122,51 @@ export default function App() {
         profile={session.profile}
         onLogout={handleLogout}
         onResetDemo={handleResetDemo}
+        onLogoClick={handleLogout}
       />
       <main className="ml-64 px-10 pb-20 pt-10">
         <ErrorBoundary key={activeTab}>
-         <div className="mx-auto max-w-[1080px] animate-fade-in">
-          {activeTab === "home" && <HomePage onTabChange={changeTab} />}
-          {activeTab === "scanner" && (
-            <RepoScanner
-              onboardingProfile={scannerHandoff?.profile || session.profile}
-              autoStartToken={scannerHandoff?.autoStart ? scannerHandoff.token : null}
-              onAutoStartConsumed={() => setScannerHandoff(null)}
-              onNavigate={changeTab}
-            />
-          )}
-          {activeTab === "benchmark" && <Benchmark />}
-          {activeTab === "startup" && (
-            <StartupGrader onRecommendationsUpdated={setStartupRecommendations} />
-          )}
-          {activeTab === "legal" && <LegalIntelligence />}
-          {activeTab === "recs" && (
-            <ActiveRecommendations
-              snapshot={startupRecommendations}
-              onGoToStartup={() => changeTab("startup")}
-            />
-          )}
-          {activeTab === "financial" && <FinancialCompliance />}
-         </div>
+          <div
+            className={`mx-auto animate-fade-in ${activeTab === "issues" ? "max-w-[1420px]" : "max-w-[1080px]"}`}
+          >
+            {activeTab === "home" && (
+              <HomePage
+                onTabChange={changeTab}
+                profile={session.profile}
+                latestRepoScan={latestRepoScan}
+                recommendations={startupRecommendations}
+              />
+            )}
+            {activeTab === "scanner" && (
+              <RepoScanner
+                onScanComplete={setLatestRepoScan}
+                onViewIssues={() => changeTab("issues")}
+                onScanCleared={handleScanCleared}
+                onboardingProfile={scannerHandoff?.profile || session.profile}
+                autoStartToken={scannerHandoff?.autoStart ? scannerHandoff.token : null}
+                onAutoStartConsumed={() => setScannerHandoff(null)}
+                onNavigate={changeTab}
+              />
+            )}
+            {activeTab === "issues" && (
+              <IssueCodeReview
+                scan={latestRepoScan}
+                onGoToScanner={() => changeTab("scanner")}
+              />
+            )}
+            {activeTab === "benchmark" && <Benchmark />}
+            {activeTab === "startup" && (
+              <StartupGrader onRecommendationsUpdated={setStartupRecommendations} />
+            )}
+            {activeTab === "legal" && <LegalIntelligence profile={session.profile} />}
+            {activeTab === "recs" && (
+              <ActiveRecommendations
+                snapshot={startupRecommendations}
+                onGoToStartup={() => changeTab("startup")}
+              />
+            )}
+            {activeTab === "financial" && <FinancialCompliance />}
+          </div>
         </ErrorBoundary>
       </main>
     </div>

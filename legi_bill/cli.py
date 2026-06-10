@@ -32,7 +32,7 @@ def cli():
 def scrape_cmd(session, keywords, limit):
     """Scrape California environmental bills from LegiScan into the local DB."""
     cfg = load_config()
-    conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
+    conn = init_db(cfg["db_path"])
     kw_list = keywords.split() if keywords else ENVIRONMENTAL_KEYWORDS
     year = int(session) if session else datetime.now().year
 
@@ -53,7 +53,7 @@ def scrape_cmd(session, keywords, limit):
 def scrape_bills_cmd(bill_numbers):
     """Fetch specific CA bills by number (e.g. SB253 SB54 AB1305) into the local DB."""
     cfg = load_config()
-    conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
+    conn = init_db(cfg["db_path"])
     bills = fetch_specific_bills(api_key=cfg["legiscan_api_key"], bill_numbers=list(bill_numbers))
     for bill in bills:
         upsert_bill(conn, bill)
@@ -72,7 +72,7 @@ def summarize_cmd(bill_number, process_all, force, llm_provider, llm_model):
         raise click.UsageError("Provide --bill <number> or --all.")
 
     cfg = load_config()
-    conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
+    conn = init_db(cfg["db_path"])
     client = get_chat_client(provider=llm_provider, model=llm_model)
 
     if bill_number:
@@ -120,7 +120,7 @@ def summarize_cmd(bill_number, process_all, force, llm_provider, llm_model):
 def show_cmd(bill_number, fmt):
     """Display a bill with its summary and compliance questions."""
     cfg = load_config()
-    conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
+    conn = init_db(cfg["db_path"])
     result = get_bill_with_summary_and_questions(conn, bill_number)
 
     if not result:
@@ -174,7 +174,7 @@ def show_cmd(bill_number, fmt):
 def list_cmd(session, fmt):
     """List all bills in the database."""
     cfg = load_config()
-    conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
+    conn = init_db(cfg["db_path"])
     year = int(session) if session else None
     bills = get_all_bills(conn, session_year=year)
 
@@ -200,7 +200,7 @@ def list_cmd(session, fmt):
 def export_cmd(output):
     """Export all bills, summaries, and compliance questions to a JSON file."""
     cfg = load_config()
-    conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
+    conn = init_db(cfg["db_path"])
     bills = get_all_bills(conn)
 
     records = []
@@ -224,6 +224,36 @@ def export_cmd(output):
         json.dump(records, f, indent=2)
 
     click.echo(f"Exported {len(records)} bills to {output}.")
+
+
+@cli.command("run-pipeline")
+@click.option("--session", default=None, type=int, help="Legislative session year (default: current year)")
+@click.option("--limit", default=200, show_default=True, help="Max bills to fetch from LegiScan")
+@click.option("--no-summarize", "skip_summarize", is_flag=True, default=False, help="Skip LLM summarization step")
+def run_pipeline_cmd(session, limit, skip_summarize):
+    """Fetch new LegiScan bills and summarize any that haven't been processed yet."""
+    import logging
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
+
+    from .pipeline import run_nightly_pipeline
+
+    cfg = load_config()
+    conn = init_db(cfg["db_path"])
+
+    click.echo("Running nightly bill pipeline…")
+    stats = run_nightly_pipeline(cfg, conn, session_year=session, limit=limit, summarize=not skip_summarize)
+
+    click.echo(f"  Bills fetched:        {stats['bills_fetched']}")
+    click.echo(f"  New:                  {stats['bills_new']}")
+    click.echo(f"  Updated:              {stats['bills_updated']}")
+    click.echo(f"  Summaries attempted:  {stats['summaries_attempted']}")
+    click.echo(f"  Summaries OK:         {stats['summaries_ok']}")
+    click.echo(f"  Summaries failed:     {stats['summaries_failed']}")
+    if stats["errors"]:
+        click.echo("  Errors:", err=True)
+        for e in stats["errors"]:
+            click.echo(f"    - {e}", err=True)
+    click.echo(f"Pipeline finished at {stats['finished_at']}.")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
 import json as _json
 import os
+import logging
 import sys
+from contextlib import asynccontextmanager
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import List, Optional
@@ -18,7 +20,18 @@ from .legal_intelligence import CA_BILLS_INTRODUCED, detect_industry, calculate_
 from .llm import LLMConfigError, LLMProviderCapabilityError, get_chat_client
 from .storage import init_db, get_all_bills, get_bill_with_summary_and_questions
 
-app = FastAPI(title="Legi-Bill API")
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from .scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
+    yield
+    stop_scheduler()
+
+
+app = FastAPI(title="Legi-Bill API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,7 +46,7 @@ def get_conn():
     global _conn
     if _conn is None:
         cfg = load_config()
-        _conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
+        _conn = init_db(cfg["db_path"])
     return _conn
 
 
@@ -1743,27 +1756,27 @@ def scan_repo(req: RepoScanRequest):
     }
 
 
-def _ensure_startup_risk_path() -> None:
-    startup_risk_root = Path(__file__).resolve().parents[1] / "startup-risk"
-    if str(startup_risk_root) not in sys.path:
-        sys.path.insert(0, str(startup_risk_root))
+# ---------------------------------------------------------------------------
+# Nightly pipeline endpoints
+# ---------------------------------------------------------------------------
 
-
-def _legal_intelligence_store():
-    _ensure_startup_risk_path()
-    from startup_risk.legal_intelligence import LegalIntelligenceStore
-
-    store_dir = os.getenv("STARTUP_RISK_LEGAL_INTELLIGENCE_DIR")
-    if not store_dir:
-        store_dir = str(Path(__file__).resolve().parents[1] / ".startup-risk" / "legal-intelligence")
-    return LegalIntelligenceStore(store_dir)
-
-
-def _load_startup_legal_guidance_index(profile: dict | None = None):
+@app.post("/api/pipeline/run")
+def pipeline_run_now():
+    """Trigger the nightly bill-fetch pipeline immediately (admin use)."""
+    from .scheduler import trigger_now
     try:
-        from startup_risk.legal_intelligence import LegalGuidanceIndex
+        trigger_now()
+        return {"status": "triggered", "message": "Pipeline dispatched in background."}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
-        rules = _legal_intelligence_store().load_rules()
-        return LegalGuidanceIndex(rules, profile=profile) if rules else None
-    except Exception:
-        return None
+
+@app.get("/api/pipeline/status")
+def pipeline_status():
+    """Return the next scheduled pipeline run time."""
+    from .scheduler import _scheduler
+    if _scheduler is None or not _scheduler.running:
+        return {"scheduler": "stopped", "next_run": None}
+    job = _scheduler.get_job("nightly_bill_pipeline")
+    next_run = job.next_run_time.isoformat() if job and job.next_run_time else None
+    return {"scheduler": "running", "next_run": next_run}

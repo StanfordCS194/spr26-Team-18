@@ -1,6 +1,7 @@
 # Environment and secrets
 .env
 *.db
+!data/bills.db
 
 # Node
 node_modules/

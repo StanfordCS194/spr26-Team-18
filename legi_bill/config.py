@@ -2,6 +2,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Load the repo-root .env regardless of the process CWD (e.g. uvicorn launched
+# from a subdirectory), then fall back to a .env in the CWD if present. This is
+# what makes OPENAI_API_KEY reliably available to the scanner agents.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 load_dotenv()
 
 LEGISCAN_BASE_URL = "https://api.legiscan.com/"

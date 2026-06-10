@@ -79,8 +79,11 @@ def load_config() -> dict:
     gemini_key = os.getenv("GEMINI_API_KEY")
 
 
-    raw_db_path = os.getenv("LEGI_BILL_DB_PATH", "~/.legi_bill/bills.db")
-    db_path = str(Path(raw_db_path).expanduser())
+    # Default to data/bills.db at the repo root so GitHub Actions can commit
+    # it and Vercel deploys it as a static artifact alongside the app code.
+    _repo_root = Path(__file__).resolve().parents[1]
+    default_db = str(_repo_root / "data" / "bills.db")
+    db_path = str(Path(os.getenv("LEGI_BILL_DB_PATH", default_db)).expanduser())
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
     return {
@@ -92,6 +95,4 @@ def load_config() -> dict:
         "llm_model": os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or OPENAI_MODEL,
         "openai_model": os.getenv("OPENAI_MODEL") or OPENAI_MODEL,
         "db_path": db_path,
-        "turso_url": os.getenv("TURSO_DATABASE_URL"),
-        "turso_token": os.getenv("TURSO_AUTH_TOKEN"),
     }

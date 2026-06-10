@@ -1,5 +1,7 @@
 import json as _json
+import logging
 import sys
+from contextlib import asynccontextmanager
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import List, Optional
@@ -17,7 +19,18 @@ from .legal_intelligence import detect_industry, calculate_savings
 from .llm import LLMConfigError, LLMProviderCapabilityError, get_chat_client
 from .storage import init_db, get_all_bills, get_bill_with_summary_and_questions
 
-app = FastAPI(title="Legi-Bill API")
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from .scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
+    yield
+    stop_scheduler()
+
+
+app = FastAPI(title="Legi-Bill API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,7 +45,7 @@ def get_conn():
     global _conn
     if _conn is None:
         cfg = load_config()
-        _conn = init_db(cfg["db_path"], cfg.get("turso_url"), cfg.get("turso_token"))
+        _conn = init_db(cfg["db_path"])
     return _conn
 
 
@@ -1215,3 +1228,29 @@ def scan_repo(req: RepoScanRequest):
         "our_vuln_count": our_vulns,
         "our_secret_count": our_secrets,
     }
+
+
+# ---------------------------------------------------------------------------
+# Nightly pipeline endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/api/pipeline/run")
+def pipeline_run_now():
+    """Trigger the nightly bill-fetch pipeline immediately (admin use)."""
+    from .scheduler import trigger_now
+    try:
+        trigger_now()
+        return {"status": "triggered", "message": "Pipeline dispatched in background."}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/pipeline/status")
+def pipeline_status():
+    """Return the next scheduled pipeline run time."""
+    from .scheduler import _scheduler
+    if _scheduler is None or not _scheduler.running:
+        return {"scheduler": "stopped", "next_run": None}
+    job = _scheduler.get_job("nightly_bill_pipeline")
+    next_run = job.next_run_time.isoformat() if job and job.next_run_time else None
+    return {"scheduler": "running", "next_run": next_run}

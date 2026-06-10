@@ -6,7 +6,7 @@ import {
   ShieldAlert, FileSearch, Package, Lock, BarChart2,
   Loader2, ExternalLink, ChevronDown, ChevronUp,
   KeyRound, Bug, RefreshCw, ShieldCheck, Sparkles,
-  Scale, GitMerge, EyeOff, Gauge,
+  Scale, GitMerge, EyeOff, Gauge, Trophy, Clock,
 } from "lucide-react";
 
 // ── Industry verticals ────────────────────────────────────────────────────────
@@ -248,6 +248,9 @@ function ResultsView({ results, repoUrl, industry, onboardingProfile, onReset, o
   );
   const total = findings.length;
   const ind = INDUSTRIES.find((i) => i.id === industry);
+  const cves = findings.filter((f) => f.category === "dependency_vulnerability");
+  const trivy = results.trivy_comparison;
+  const ourVulns = results.our_vuln_count ?? cves.length;
 
   const bySeverity = ["critical", "high", "medium", "low", "info"]
     .map((sev) => ({ sev, items: findings.filter((f) => f.severity === sev) }))
@@ -319,6 +322,74 @@ function ResultsView({ results, repoUrl, industry, onboardingProfile, onReset, o
           </div>
         ))}
       </div>
+
+      {/* Timing */}
+      {results.timing_seconds && (
+        <div className="flex items-center gap-2 text-[13px] text-text-secondary">
+          <Clock className="h-3.5 w-3.5 text-text-muted" strokeWidth={2} />
+          Scan completed in <strong className="text-text-primary ml-1">{results.timing_seconds}s</strong>
+        </div>
+      )}
+
+      {/* CVE banner */}
+      {cves.length > 0 && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-100 border border-red-200">
+              <Bug className="h-4 w-4 text-red-600" strokeWidth={2} />
+            </div>
+            <div>
+              <div className="text-[14px] font-semibold text-red-800 mb-1">
+                {cves.length} known CVE{cves.length !== 1 ? "s" : ""} detected in dependencies
+              </div>
+              {cves.map((f) => (
+                <div key={f.id} className="mt-2 text-[13px] font-medium text-red-700">
+                  {f.title}
+                  {f.evidence?.[0]?.excerpt && (
+                    <a href={f.evidence[0].excerpt} target="_blank" rel="noreferrer"
+                      className="ml-2 text-[12px] text-red-500 underline inline-flex items-center gap-0.5">
+                      OSV advisory <ExternalLink className="h-3 w-3" strokeWidth={2} />
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Trivy comparison */}
+      {trivy && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100 border border-emerald-200">
+              <Trophy className="h-4 w-4 text-emerald-600" strokeWidth={2} />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[14px] font-semibold text-text-primary">Benchmark vs. Trivy</span>
+                {ourVulns > trivy.trivy_vulns && (
+                  <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-emerald-700 bg-emerald-100 border border-emerald-200">
+                    We found more
+                  </span>
+                )}
+              </div>
+              <p className="text-[13px] text-text-secondary leading-relaxed">{trivy.trivy_note}</p>
+              <div className="mt-3 flex gap-6">
+                <div>
+                  <div className="text-[20px] font-bold text-emerald-600">{ourVulns}</div>
+                  <div className="text-[11px] text-text-muted">Our CVEs</div>
+                </div>
+                <div className="flex items-center text-text-muted text-[13px]">vs</div>
+                <div>
+                  <div className="text-[20px] font-bold text-text-muted">{trivy.trivy_vulns}</div>
+                  <div className="text-[11px] text-text-muted">Trivy CVEs</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {onboardingProfile && (
         <WorkspaceReady profile={onboardingProfile} onNavigate={onNavigate} />

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from startup_risk.scanners.analytics_privacy import AnalyticsPrivacyScanner
 from startup_risk.scanners.auth_agent import AuthAccessControlAgent
+from startup_risk.scanners.cicd_scanner import CICDSecurityScanner
+from startup_risk.scanners.error_disclosure_scanner import ErrorDisclosureScanner
+from startup_risk.scanners.legal_docs_scanner import LegalDocScanner
+from startup_risk.scanners.rate_limit_scanner import RateLimitScanner
 from startup_risk.scanners.base import InventoryScanner, Scanner
 from startup_risk.scanners.code_compliance_scanner import CodeComplianceScanner
 from startup_risk.scanners.custom_scanner import CustomScanner
@@ -60,6 +64,7 @@ def default_scanners(
         ),
         DependencyVulnScanner(enable_osv=vuln_osv),
         OutdatedDepsScanner(enable_registry=outdated_registry),
+        AnalyticsPrivacyScanner(),
         CodeComplianceScanner(),
         # LLM reasoning agents. Each is no-op safe: returns [] without an LLM key.
         AuthAccessControlAgent(),
@@ -73,7 +78,10 @@ def default_scanners(
             international=international,
             multi_state=multi_state,
         ),
-        AnalyticsPrivacyScanner(),
+        LegalDocScanner(),
+        CICDSecurityScanner(),
+        ErrorDisclosureScanner(),
+        RateLimitScanner(),
         # Opt-in: returns [] unless a questionnaire/PRD and an LLM are available.
         CustomScanner(
             questionnaire=custom_questionnaire,

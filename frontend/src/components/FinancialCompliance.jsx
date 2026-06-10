@@ -279,7 +279,7 @@ const STEP_LABELS = ["Company profile", "Operations", "Upload documents"];
 
 function StepIndicator({ step }) {
   return (
-    <div className="flex items-center gap-2 flex-wrap">
+    <div className="animate-slide-up flex items-center gap-2 flex-wrap" style={{ animationDelay: "0.04s" }}>
       {STEP_LABELS.map((label, i) => {
         const n = i + 1;
         const active = n === step;
@@ -329,16 +329,11 @@ export default function FinancialCompliance() {
   const canStep2 = entityType && selectedStage && companySize && industry;
   const canStep3 = incorporationState && international !== null;
 
-  const ctx = {
-    stage: selectedStage,
-    international,
-    employeeStates,
-    incorporationState,
-  };
-  const docs       = selectedStage ? getDocsForContext(ctx) : [];
-  const uploadedIds = Object.keys(uploads);
+  const ctx = { stage: selectedStage, international, employeeStates, incorporationState };
+  const docs           = selectedStage ? getDocsForContext(ctx) : [];
+  const uploadedIds    = Object.keys(uploads);
   const requiredMissing = docs.filter((d) => d.required && !uploads[d.id]);
-  const canScan = uploadedIds.length > 0;
+  const canScan        = uploadedIds.length > 0;
 
   function handleFileChange(docId, file) {
     if (file) setUploads((p) => ({ ...p, [docId]: file }));
@@ -399,24 +394,28 @@ export default function FinancialCompliance() {
 
   return (
     <section className="space-y-8">
+
+      {/* ── Header ── */}
       <header className="space-y-2">
-        <div className="flex items-center gap-2 text-text-secondary">
+        <div className="animate-slide-up flex items-center gap-2 text-text-secondary" style={{ animationDelay: "0s" }}>
           <ShieldCheck className="h-4 w-4 text-accent-gold" strokeWidth={2.4} />
-          <span className="text-[12px] uppercase tracking-[0.18em]">IRS Compliance · prototype</span>
+          <span className="text-[12px] uppercase tracking-[0.18em]">IRS Compliance · Tax Audit</span>
         </div>
-        <h1 className="text-[32px] font-bold tracking-tight">Financial compliance audit.</h1>
-        <p className="max-w-[600px] text-[14px] leading-relaxed text-text-secondary">
-          Answer a few questions about your company, then upload your financial documents
-          to get a stage-specific IRS compliance risk assessment. Not a substitute for
-          professional tax advice.
-        </p>
+        <div className="animate-slide-up" style={{ animationDelay: "0.06s" }}>
+          <h1 className="text-[32px] font-bold tracking-tight">Financial compliance audit.</h1>
+          <p className="mt-2 max-w-[600px] text-[14px] leading-relaxed text-text-secondary">
+            Answer a few questions about your company, then upload your financial documents
+            to get a stage-specific IRS compliance risk assessment. Not a substitute for
+            professional tax advice.
+          </p>
+        </div>
       </header>
 
       {step < 4 && <StepIndicator step={step} />}
 
       {/* ── Step 1: Company profile ── */}
       {step === 1 && (
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-card space-y-7">
+        <div className="animate-slide-up rounded-3xl border border-border bg-card p-6 shadow-card space-y-7" style={{ animationDelay: "0.1s" }}>
           <div>
             <h3 className="text-[18px] font-bold tracking-tight">Tell us about your company</h3>
             <p className="mt-1 text-[13px] text-text-secondary">
@@ -446,7 +445,11 @@ export default function FinancialCompliance() {
                   className={pill(entityType === e.id)}
                 >
                   <span>{e.label}</span>
-                  {e.hint && <span className={`block text-[10px] font-normal mt-0.5 ${entityType === e.id ? "text-text-invert/70" : "text-text-muted"}`}>{e.hint}</span>}
+                  {e.hint && (
+                    <span className={`block text-[10px] font-normal mt-0.5 ${entityType === e.id ? "text-text-invert/70" : "text-text-muted"}`}>
+                      {e.hint}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -468,7 +471,10 @@ export default function FinancialCompliance() {
             <div className="flex flex-wrap gap-2">
               {COMPANY_SIZES.map((s) => (
                 <button key={s.id} type="button" onClick={() => setCompanySize(s.id)} className={pill(companySize === s.id)}>
-                  {s.label} <span className={`text-[11px] font-normal ${companySize === s.id ? "text-text-invert/70" : "text-text-muted"}`}>employees</span>
+                  {s.label}{" "}
+                  <span className={`text-[11px] font-normal ${companySize === s.id ? "text-text-invert/70" : "text-text-muted"}`}>
+                    employees
+                  </span>
                 </button>
               ))}
             </div>
@@ -495,11 +501,7 @@ export default function FinancialCompliance() {
           </Field>
 
           <div className="flex justify-end pt-1">
-            <button
-              disabled={!canStep2}
-              onClick={() => setStep(2)}
-              className={cta(!canStep2)}
-            >
+            <button disabled={!canStep2} onClick={() => setStep(2)} className={cta(!canStep2)}>
               Continue <ChevronRight className="h-3.5 w-3.5" strokeWidth={2.5} />
             </button>
           </div>
@@ -508,7 +510,7 @@ export default function FinancialCompliance() {
 
       {/* ── Step 2: Operations ── */}
       {step === 2 && (
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-card space-y-7">
+        <div className="animate-slide-up rounded-3xl border border-border bg-card p-6 shadow-card space-y-7" style={{ animationDelay: "0.1s" }}>
           <div className="flex items-start justify-between">
             <div>
               <h3 className="text-[18px] font-bold tracking-tight">Where do you operate?</h3>
@@ -532,7 +534,7 @@ export default function FinancialCompliance() {
               <option value="NY">New York</option>
               <option value="TX">Texas</option>
               <option disabled>──────────────</option>
-              {US_STATES.filter(s => !["DE","CA","NY","TX"].includes(s.code)).map((s) => (
+              {US_STATES.filter((s) => !["DE", "CA", "NY", "TX"].includes(s.code)).map((s) => (
                 <option key={s.code} value={s.code}>{s.name}</option>
               ))}
             </select>
@@ -568,7 +570,9 @@ export default function FinancialCompliance() {
                   onClick={() => setInternational(opt.id)}
                   className={pill(international === opt.id)}
                 >
-                  {opt.id === "yes" && <Globe className={`h-3.5 w-3.5 ${international === "yes" ? "text-text-invert" : "text-text-muted"}`} strokeWidth={2.4} />}
+                  {opt.id === "yes" && (
+                    <Globe className={`h-3.5 w-3.5 ${international === "yes" ? "text-text-invert" : "text-text-muted"}`} strokeWidth={2.4} />
+                  )}
                   {opt.label}
                 </button>
               ))}
@@ -586,15 +590,15 @@ export default function FinancialCompliance() {
 
       {/* ── Step 3: Documents ── */}
       {step === 3 && (
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
+        <div className="animate-slide-up space-y-4" style={{ animationDelay: "0.1s" }}>
+          <div className="rounded-3xl border border-border bg-card p-6 shadow-card">
             <div className="mb-1 flex items-start justify-between gap-4">
               <div>
                 <h3 className="text-[18px] font-bold tracking-tight">Upload your documents</h3>
                 <p className="mt-1 text-[13px] text-text-secondary">
                   We&apos;ve filtered this list to the {docs.length} documents most relevant to a{" "}
-                  <strong>{STAGES.find(s => s.id === selectedStage)?.label}</strong>{" "}
-                  {ENTITY_TYPES.find(e => e.id === entityType)?.label}{" "}
+                  <strong>{STAGES.find((s) => s.id === selectedStage)?.label}</strong>{" "}
+                  {ENTITY_TYPES.find((e) => e.id === entityType)?.label}{" "}
                   {international === "yes" ? "with international operations" : "operating in the US"}.
                   Upload as many as possible for the most accurate scan.
                 </p>
@@ -605,14 +609,14 @@ export default function FinancialCompliance() {
             {/* Context summary chips */}
             <div className="mt-3 mb-5 flex flex-wrap gap-1.5">
               {[
-                STAGES.find(s => s.id === selectedStage)?.label,
-                ENTITY_TYPES.find(e => e.id === entityType)?.label,
-                COMPANY_SIZES.find(s => s.id === companySize)?.label + " employees",
-                incorporationState && `Inc. in ${US_STATES.find(s => s.code === incorporationState)?.name || incorporationState}`,
+                STAGES.find((s) => s.id === selectedStage)?.label,
+                ENTITY_TYPES.find((e) => e.id === entityType)?.label,
+                COMPANY_SIZES.find((s) => s.id === companySize)?.label + " employees",
+                incorporationState && `Inc. in ${US_STATES.find((s) => s.code === incorporationState)?.name || incorporationState}`,
                 employeeStates.length > 0 && `${employeeStates.length} remote state${employeeStates.length > 1 ? "s" : ""}`,
                 international === "yes" && "International",
               ].filter(Boolean).map((tag) => (
-                <span key={tag} className="rounded-full border border-border bg-chip px-2.5 py-0.5 text-[11px] text-text-secondary">{tag}</span>
+                <span key={tag} className="rounded-full border border-chip bg-chip px-2.5 py-0.5 text-[11px] text-text-secondary">{tag}</span>
               ))}
             </div>
 
@@ -631,7 +635,7 @@ export default function FinancialCompliance() {
           </div>
 
           {/* Footer */}
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+          <div className="rounded-3xl border border-border bg-card p-5 shadow-card">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <div className="text-[13px] font-semibold text-text-primary">
@@ -665,7 +669,9 @@ export default function FinancialCompliance() {
 
       {/* ── Step 4: Results ── */}
       {step === 4 && result && (
-        <AuditResult result={result} onReset={reset} />
+        <div className="animate-slide-up" style={{ animationDelay: "0.1s" }}>
+          <AuditResult result={result} onReset={reset} />
+        </div>
       )}
     </section>
   );
@@ -738,7 +744,7 @@ function StateMultiSelect({ selected, onChange, excludeCode }) {
           {selected.map((code) => {
             const s = US_STATES.find((s) => s.code === code);
             return (
-              <span key={code} className="flex items-center gap-1 rounded-full border border-border bg-chip px-2.5 py-0.5 text-[12px] text-text-secondary">
+              <span key={code} className="flex items-center gap-1 rounded-full border border-chip bg-chip px-2.5 py-0.5 text-[12px] text-text-secondary">
                 <MapPin className="h-3 w-3 text-text-muted" strokeWidth={2} />
                 {s?.name || code}
                 <button type="button" onClick={() => removeState(code)} className="ml-0.5 hover:text-red-500">
@@ -782,7 +788,7 @@ function StateMultiSelect({ selected, onChange, excludeCode }) {
 
 function DocumentRow({ doc, uploaded, fileRef, onFileChange, onRemove }) {
   return (
-    <div className={`flex items-start gap-3 rounded-xl border p-4 transition-colors
+    <div className={`flex items-start gap-3 rounded-2xl border p-4 transition-colors
       ${uploaded ? "border-green-200 bg-green-50/40" : "border-border bg-chip-alt/30 hover:border-border-muted"}`}>
       <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-chip">
         <FileText className="h-4 w-4 text-text-secondary" strokeWidth={2} />
@@ -856,7 +862,7 @@ function AuditResult({ result, onReset }) {
         </button>
       </div>
 
-      <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+      <div className="rounded-3xl border border-border bg-card p-5 shadow-card">
         <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-text-muted">Summary</div>
         <p className="text-[14px] leading-relaxed text-text-primary">{result.summary}</p>
       </div>
@@ -867,9 +873,9 @@ function AuditResult({ result, onReset }) {
             {issues.length} compliance issue{issues.length !== 1 ? "s" : ""} identified
           </div>
           {[
-            { label: "High severity", items: high,   color: "text-red-600",   dot: "bg-red-500" },
+            { label: "High severity",   items: high,   color: "text-red-600",    dot: "bg-red-500" },
             { label: "Medium severity", items: medium, color: "text-orange-600", dot: "bg-orange-400" },
-            { label: "Low severity",  items: low,    color: "text-green-700", dot: "bg-green-500" },
+            { label: "Low severity",    items: low,    color: "text-green-700",  dot: "bg-green-500" },
           ].map(({ label, items, color, dot }) =>
             items.length > 0 ? (
               <div key={label} className="space-y-2">
@@ -883,13 +889,13 @@ function AuditResult({ result, onReset }) {
           )}
         </div>
       ) : (
-        <div className="rounded-2xl border border-green-200 bg-green-50 p-5 text-[13px] text-green-700">
+        <div className="rounded-3xl border border-green-200 bg-green-50 p-5 text-[13px] text-green-700">
           No IRS compliance issues were identified in the provided documents.
         </div>
       )}
 
       {notes.length > 0 && (
-        <div className="rounded-2xl border border-border-muted bg-chip-alt p-4">
+        <div className="rounded-3xl border border-border-muted bg-chip-alt p-4">
           <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-text-muted">Notes</div>
           <ul className="space-y-1">
             {notes.map((note, i) => <li key={i} className="text-[12px] text-text-secondary">· {note}</li>)}
@@ -912,12 +918,12 @@ function IssueCard({ issue }) {
     <button
       type="button"
       onClick={() => setOpen((o) => !o)}
-      className="w-full rounded-2xl border border-border bg-card p-5 shadow-card text-left transition-shadow hover:shadow-card-hover"
+      className="w-full rounded-3xl border border-border bg-card p-5 shadow-card text-left transition-shadow hover:shadow-card-hover"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2 mb-1">
-            <span className="rounded-full bg-chip px-2.5 py-0.5 text-[11px] font-medium text-text-secondary">{issue.area}</span>
+            <span className="rounded-full border border-chip bg-chip px-2.5 py-0.5 text-[11px] font-medium text-text-secondary">{issue.area}</span>
             {issue.irc_section && issue.irc_section !== "N/A" && (
               <span className="rounded-full border border-border px-2.5 py-0.5 text-[11px] font-mono text-text-muted">{issue.irc_section}</span>
             )}

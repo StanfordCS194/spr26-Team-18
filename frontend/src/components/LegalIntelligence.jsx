@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Scale, ChevronDown, ChevronUp, CheckCircle2,
   Clock, DollarSign, ShieldAlert, ShieldCheck, Sparkles, X,
+  Database, RefreshCw, Play, Search, FileText, ExternalLink, ToggleLeft, ToggleRight,
 } from "lucide-react";
 
 const COMPANY_CONTEXT_KEY = "startupGrader.companyContext.v1";
@@ -61,6 +62,62 @@ const CATEGORY_BADGE_BG = {
   "Analysis & Documentation": "bg-status-committee-bg text-status-committee-text",
   "Strategic Planning":       "bg-accent-gold/20 text-accent-gold",
   "Client Communication":     "bg-status-chaptered-bg text-status-chaptered-text",
+};
+
+const LEGAL_SOURCE_OPTIONS = [
+  ["federal_register", "Federal Register"],
+  ["courtlistener", "CourtListener"],
+  ["ecfr", "eCFR"],
+  ["regulations_gov", "Regulations.gov"],
+  ["ftc", "FTC"],
+  ["cfpb", "CFPB"],
+  ["sec", "SEC"],
+  ["hhs_ocr", "HHS OCR"],
+  ["eeoc", "EEOC"],
+  ["dol", "DOL"],
+  ["irs", "IRS"],
+  ["state_ag", "State AG"],
+];
+
+const TOPIC_OPTIONS = [
+  ["privacy", "Privacy"],
+  ["financial_compliance", "Financial compliance"],
+  ["employment_payroll", "Employment / payroll"],
+  ["security_controls", "Security controls"],
+  ["licensing", "Licensing"],
+  ["consumer_protection", "Consumer protection"],
+  ["healthcare", "Healthcare"],
+  ["ai_data_governance", "AI / data governance"],
+  ["compliance", "General compliance"],
+];
+
+const BULK_SOURCE_OPTIONS = [
+  ["govinfo", "GovInfo bulk"],
+  ["ecfr", "eCFR title XML"],
+  ["courtlistener", "CourtListener / Free Law"],
+  ["generic", "Custom bulk root"],
+];
+
+const DEFAULT_BULK_PRESETS = [
+  ["govinfo_cfr", "GovInfo CFR bulk"],
+  ["govinfo_fr", "GovInfo Federal Register bulk"],
+  ["govinfo_uscode", "GovInfo U.S. Code bulk"],
+  ["ecfr_financial_title_12", "eCFR Title 12 banks"],
+  ["ecfr_sec_title_17", "eCFR Title 17 securities"],
+  ["ecfr_ftc_title_16", "eCFR Title 16 FTC/commercial practices"],
+  ["ecfr_health_title_21", "eCFR Title 21 FDA/health"],
+  ["ecfr_hhs_title_45", "eCFR Title 45 HHS/HIPAA"],
+  ["ecfr_labor_title_29", "eCFR Title 29 labor"],
+  ["ecfr_tax_title_26", "eCFR Title 26 tax"],
+  ["free_law_opinions", "Free Law CourtListener opinions"],
+  ["free_law_clusters", "Free Law CourtListener case clusters"],
+];
+
+const BULK_DATASET_HINTS = {
+  govinfo: "CFR, FR, or USCODE",
+  ecfr: "title-16 or title-21",
+  courtlistener: "opinions or clusters",
+  generic: "dataset folder or file path",
 };
 
 // ── sub-components ────────────────────────────────────────────────────────────
@@ -157,6 +214,434 @@ function ComparisonTable({ result }) {
   );
 }
 
+function LegalIntelligenceWorkspace() {
+  const [status, setStatus] = useState(null);
+  const [sources, setSources] = useState([]);
+  const [authorities, setAuthorities] = useState([]);
+  const [rules, setRules] = useState([]);
+  const [catalog, setCatalog] = useState(null);
+  const [query, setQuery] = useState("privacy notice data security");
+  const [source, setSource] = useState("federal_register");
+  const [topic, setTopic] = useState("privacy");
+  const [industryTag, setIndustryTag] = useState("tech");
+  const [bulkLocation, setBulkLocation] = useState("");
+  const [bulkSource, setBulkSource] = useState("govinfo");
+  const [bulkDataset, setBulkDataset] = useState("CFR");
+  const [bulkBaseUrl, setBulkBaseUrl] = useState("");
+  const [bulkPreset, setBulkPreset] = useState("govinfo_cfr");
+  const [busy, setBusy] = useState(null);
+  const [message, setMessage] = useState(null);
+
+  async function loadWorkspace() {
+    try {
+      const [statusRes, sourcesRes, rulesRes, catalogRes] = await Promise.all([
+        fetch("/api/legal-intelligence/status"),
+        fetch("/api/legal-intelligence/sources"),
+        fetch("/api/legal-intelligence/rules"),
+        fetch("/api/legal-intelligence/catalog"),
+      ]);
+      if (!statusRes.ok || !sourcesRes.ok || !rulesRes.ok) {
+        throw new Error("Could not load legal intelligence workspace.");
+      }
+      const statusData = await statusRes.json();
+      const sourcesData = await sourcesRes.json();
+      const rulesData = await rulesRes.json();
+      const catalogData = catalogRes.ok ? await catalogRes.json() : null;
+      setStatus(statusData);
+      setSources(sourcesData.sources || []);
+      setAuthorities(sourcesData.authorities || []);
+      setRules(rulesData.rules || []);
+      setCatalog(catalogData);
+    } catch (e) {
+      setMessage({ type: "error", text: e.message });
+    }
+  }
+
+  useEffect(() => {
+    loadWorkspace();
+  }, []);
+
+  async function postJson(url, body) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  }
+
+  async function runFetch() {
+    if (!query.trim()) return;
+    setBusy("fetch");
+    setMessage(null);
+    try {
+      const data = await postJson("/api/legal-intelligence/fetch", {
+        source,
+        query,
+        topic,
+        jurisdiction: "US",
+        industry_tags: industryTag ? [industryTag] : [],
+        limit: 8,
+        save_source: true,
+      });
+      setMessage({ type: "ok", text: `Fetched ${data.fetched_count} authorities; ${data.changed_count} changed or new.` });
+      await loadWorkspace();
+    } catch (e) {
+      setMessage({ type: "error", text: e.message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runBulkImport() {
+    if (!bulkLocation.trim()) return;
+    setBusy("bulk");
+    setMessage(null);
+    try {
+      const data = await postJson("/api/legal-intelligence/bulk-import", {
+        location: bulkLocation.trim(),
+        source_name: "bulk",
+        topic,
+        jurisdiction: "US",
+        industry_tags: industryTag ? [industryTag] : [],
+        limit: 500,
+        save_source: true,
+      });
+      setMessage({ type: "ok", text: `Imported ${data.imported_count} bulk authorities; ${data.changed_count} changed or new.` });
+      await loadWorkspace();
+    } catch (e) {
+      setMessage({ type: "error", text: e.message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runBulkSync() {
+    if (bulkPreset === "custom" && !bulkDataset.trim()) return;
+    setBusy("bulk-sync");
+    setMessage(null);
+    try {
+      const data = await postJson("/api/legal-intelligence/bulk-sync", {
+        preset_id: bulkPreset === "custom" ? null : bulkPreset,
+        source: bulkSource,
+        dataset: bulkDataset.trim(),
+        bulk_base_url: bulkBaseUrl.trim() || null,
+        topic,
+        jurisdiction: "US",
+        industry_tags: industryTag ? [industryTag] : [],
+        limit: 500,
+        max_files: 8,
+        max_depth: 3,
+        save_source: true,
+      });
+      setMessage({ type: "ok", text: `Synced ${data.discovered_locations.length} bulk files; imported ${data.imported_count} authorities.` });
+      await loadWorkspace();
+    } catch (e) {
+      setMessage({ type: "error", text: e.message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function setupExplicitSources() {
+    setBusy("setup-sources");
+    setMessage(null);
+    try {
+      const data = await postJson("/api/legal-intelligence/source-setup", {
+        industry: industryTag || null,
+        include_bulk: true,
+      });
+      setMessage({ type: "ok", text: `Configured ${data.public_source_count} API/feed sources and ${data.bulk_source_count} bulk sources.` });
+      await loadWorkspace();
+    } catch (e) {
+      setMessage({ type: "error", text: e.message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runDistill() {
+    setBusy("distill");
+    setMessage(null);
+    try {
+      const data = await postJson("/api/legal-intelligence/distill", {
+        changed_only: true,
+        verify_citations: true,
+      });
+      setMessage({ type: "ok", text: `Distilled ${data.rule_count} scanner guidance rules.` });
+      await loadWorkspace();
+    } catch (e) {
+      setMessage({ type: "error", text: e.message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runPipeline() {
+    setBusy("pipeline");
+    setMessage(null);
+    try {
+      const data = await postJson("/api/legal-intelligence/pipeline", {
+        changed_only: true,
+        verify_citations: true,
+      });
+      setMessage({ type: "ok", text: `Pipeline complete: ${data.changed_count} changed authorities, ${data.rule_count} rules.` });
+      await loadWorkspace();
+    } catch (e) {
+      setMessage({ type: "error", text: e.message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function toggleRule(rule) {
+    setBusy(rule.id);
+    try {
+      const res = await fetch(`/api/legal-intelligence/rules/${encodeURIComponent(rule.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !rule.enabled }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await loadWorkspace();
+    } catch (e) {
+      setMessage({ type: "error", text: e.message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const enabledRules = rules.filter((r) => r.enabled && r.review_status !== "rejected").length;
+  const lastChecked = status?.last_checked ? new Date(status.last_checked).toLocaleString() : "Not refreshed";
+  const bulkPresetOptions = catalog?.bulk_sources?.length
+    ? catalog.bulk_sources.map((preset) => [preset.id, preset.label])
+    : DEFAULT_BULK_PRESETS;
+
+  return (
+    <section className="space-y-5">
+      <div className="animate-slide-up">
+        <div className="mb-2 flex items-center gap-2 text-text-secondary">
+          <Database className="h-4 w-4 text-accent-gold" strokeWidth={2.4} />
+          <span className="text-[12px] uppercase tracking-[0.18em]">Legal Intelligence</span>
+        </div>
+        <h1 className="animate-shimmer-text text-[32px] font-bold tracking-tight">
+          Scanner Guidance Workspace
+        </h1>
+        <p className="mt-2 max-w-[680px] text-[15px] leading-relaxed text-text-secondary">
+          Fetch public legal authorities, distill them into scanner guidance, and decide which
+          source-backed rules should enrich repo findings.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-4 gap-3">
+        <StatCard label="Authorities" value={status?.authority_count ?? 0} sub="Fetched source records" />
+        <StatCard label="Enabled rules" value={enabledRules} sub={`${status?.rule_count ?? 0} total rules`} />
+        <StatCard label="Saved queries" value={status?.source_count ?? 0} sub="Refreshable sources" />
+        <StatCard label="Last refresh" value={lastChecked === "Not refreshed" ? "Never" : "Ready"} sub={lastChecked} />
+      </div>
+
+      <div className="rounded-3xl border border-border bg-card p-5 shadow-card">
+        <div className="grid gap-3 lg:grid-cols-[1.4fr_180px_180px_140px_auto]">
+          <div>
+            <label className="mb-1 block text-[11px] uppercase tracking-wider text-text-muted">Public legal query</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-text-muted" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="w-full rounded-xl border border-border bg-chip-alt py-2 pl-9 pr-3 text-[13px] text-text-primary focus:border-accent-gold focus:outline-none"
+                placeholder="privacy notice data security"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] uppercase tracking-wider text-text-muted">Source</label>
+            <select value={source} onChange={(e) => setSource(e.target.value)} className="w-full rounded-xl border border-border bg-chip-alt px-3 py-2 text-[13px] text-text-primary focus:border-accent-gold focus:outline-none">
+              {LEGAL_SOURCE_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] uppercase tracking-wider text-text-muted">Topic</label>
+            <select value={topic} onChange={(e) => setTopic(e.target.value)} className="w-full rounded-xl border border-border bg-chip-alt px-3 py-2 text-[13px] text-text-primary focus:border-accent-gold focus:outline-none">
+              {TOPIC_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] uppercase tracking-wider text-text-muted">Industry tag</label>
+            <input
+              value={industryTag}
+              onChange={(e) => setIndustryTag(e.target.value)}
+              className="w-full rounded-xl border border-border bg-chip-alt px-3 py-2 text-[13px] text-text-primary focus:border-accent-gold focus:outline-none"
+              placeholder="tech"
+            />
+          </div>
+          <div className="flex items-end">
+            <button onClick={runFetch} disabled={!!busy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-action-dark px-4 py-2 text-[13px] font-semibold text-text-invert hover:opacity-90 disabled:opacity-40">
+              <RefreshCw className={`h-4 w-4 ${busy === "fetch" ? "animate-spin" : ""}`} />
+              Fetch
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-border bg-chip-alt/60 p-3">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-[12px] font-semibold text-text-primary">
+              <Database className="h-4 w-4 text-accent-gold" />
+              Explicit legal data sources
+            </div>
+            <button onClick={setupExplicitSources} disabled={!!busy} className="rounded-xl border border-border bg-card px-3 py-1.5 text-[12px] font-semibold text-text-primary hover:bg-white disabled:opacity-40">
+              Set up defaults
+            </button>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+            <div>
+              <label className="mb-1 block text-[11px] uppercase tracking-wider text-text-muted">Bulk source preset</label>
+              <select value={bulkPreset} onChange={(e) => setBulkPreset(e.target.value)} className="w-full rounded-xl border border-border bg-card px-3 py-2 text-[13px] text-text-primary focus:border-accent-gold focus:outline-none">
+                {bulkPresetOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                <option value="custom">Custom bulk source</option>
+              </select>
+            </div>
+            <div className="flex items-end">
+              <button onClick={runBulkSync} disabled={!!busy || (bulkPreset === "custom" && !bulkDataset.trim())} className="flex w-full items-center justify-center gap-2 rounded-xl bg-action-dark px-4 py-2 text-[13px] font-semibold text-text-invert hover:opacity-90 disabled:opacity-40">
+                <RefreshCw className={`h-4 w-4 ${busy === "bulk-sync" ? "animate-spin" : ""}`} />
+                Sync selected
+              </button>
+            </div>
+          </div>
+          {bulkPreset === "custom" && (
+          <div className="mt-3 grid gap-3 lg:grid-cols-[180px_180px_1fr]">
+            <div>
+              <label className="mb-1 block text-[11px] uppercase tracking-wider text-text-muted">Bulk source</label>
+              <select value={bulkSource} onChange={(e) => setBulkSource(e.target.value)} className="w-full rounded-xl border border-border bg-card px-3 py-2 text-[13px] text-text-primary focus:border-accent-gold focus:outline-none">
+                {BULK_SOURCE_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] uppercase tracking-wider text-text-muted">Dataset</label>
+              <input
+                value={bulkDataset}
+                onChange={(e) => setBulkDataset(e.target.value)}
+                className="w-full rounded-xl border border-border bg-card px-3 py-2 text-[13px] text-text-primary focus:border-accent-gold focus:outline-none"
+                placeholder={BULK_DATASET_HINTS[bulkSource]}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] uppercase tracking-wider text-text-muted">Base URL override</label>
+              <input
+                value={bulkBaseUrl}
+                onChange={(e) => setBulkBaseUrl(e.target.value)}
+                className="w-full rounded-xl border border-border bg-card px-3 py-2 text-[13px] text-text-primary focus:border-accent-gold focus:outline-none"
+                placeholder="Optional S3/static bulk root"
+              />
+            </div>
+          </div>
+          )}
+          <div className="mt-2 text-[11px] leading-5 text-text-muted">
+            Defaults include GovInfo CFR/Federal Register/U.S. Code, eCFR domain titles, Free Law CourtListener bulk snapshots, and agency/API feeds. The selected preset is saved for future refreshes.
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto]">
+          <div>
+            <label className="mb-1 block text-[11px] uppercase tracking-wider text-text-muted">Bulk data path or HTTPS URL</label>
+            <input
+              value={bulkLocation}
+              onChange={(e) => setBulkLocation(e.target.value)}
+              className="w-full rounded-xl border border-border bg-chip-alt px-3 py-2 text-[13px] text-text-primary focus:border-accent-gold focus:outline-none"
+              placeholder="/data/courtlistener/opinions.jsonl.gz or https://..."
+            />
+          </div>
+          <div className="flex items-end">
+            <button onClick={runBulkImport} disabled={!!busy || !bulkLocation.trim()} className="flex items-center gap-2 rounded-xl border border-border bg-chip-alt px-4 py-2 text-[13px] font-semibold text-text-primary hover:bg-white disabled:opacity-40">
+              <Database className="h-4 w-4" />
+              Bulk import
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button onClick={runDistill} disabled={!!busy} className="flex items-center gap-2 rounded-xl border border-border bg-chip-alt px-4 py-2 text-[13px] font-semibold text-text-primary hover:bg-white disabled:opacity-40">
+            <FileText className="h-4 w-4" />
+            Distill changed sources
+          </button>
+          <button onClick={runPipeline} disabled={!!busy} className="flex items-center gap-2 rounded-xl bg-accent-gold px-4 py-2 text-[13px] font-semibold text-white hover:opacity-90 disabled:opacity-40">
+            <Play className="h-4 w-4" />
+            Run pipeline
+          </button>
+          {message && (
+            <div className={`rounded-xl px-3 py-2 text-[12px] ${message.type === "error" ? "bg-status-committee-bg text-status-committee-text" : "bg-status-chaptered-bg text-status-chaptered-text"}`}>
+              {message.text}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-2">
+        <LegalTable
+          title="Fetched authorities"
+          empty="No authorities fetched yet."
+          rows={authorities.slice(0, 8)}
+          render={(authority) => (
+            <div key={authority.source_id} className="grid grid-cols-[1fr_auto] gap-3 border-b border-border px-4 py-3 last:border-0">
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-semibold text-text-primary">{authority.title}</div>
+                <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-text-muted">
+                  <span>{authority.metadata?.source || authority.authority_type}</span>
+                  <span>{authority.topic}</span>
+                  <span>{authority.citation || "No citation"}</span>
+                </div>
+              </div>
+              {authority.url && (
+                <a href={authority.url} target="_blank" rel="noreferrer" className="text-text-muted hover:text-text-primary">
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              )}
+            </div>
+          )}
+        />
+
+        <LegalTable
+          title="Distilled scanner rules"
+          empty="No scanner guidance rules yet."
+          rows={rules.slice(0, 8)}
+          render={(rule) => (
+            <div key={rule.id} className="border-b border-border px-4 py-3 last:border-0">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-semibold text-text-primary">{rule.title}</div>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    <span className="rounded-full bg-chip px-2 py-0.5 text-[10px] font-semibold text-text-muted">{rule.category}</span>
+                    <span className="rounded-full bg-chip px-2 py-0.5 text-[10px] font-semibold text-text-muted">{rule.confidence} confidence</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${rule.citation_verified ? "bg-status-chaptered-bg text-status-chaptered-text" : "bg-chip text-text-muted"}`}>
+                      {rule.citation_verified ? "citation verified" : "source-backed"}
+                    </span>
+                  </div>
+                  <p className="mt-2 line-clamp-2 text-[12px] leading-relaxed text-text-secondary">{rule.finding_rationale}</p>
+                </div>
+                <button onClick={() => toggleRule(rule)} disabled={busy === rule.id} className="text-text-muted hover:text-text-primary">
+                  {rule.enabled ? <ToggleRight className="h-6 w-6 text-status-chaptered-text" /> : <ToggleLeft className="h-6 w-6" />}
+                </button>
+              </div>
+            </div>
+          )}
+        />
+      </div>
+    </section>
+  );
+}
+
+function LegalTable({ title, empty, rows, render }) {
+  return (
+    <div className="overflow-hidden rounded-3xl border border-border bg-card shadow-card">
+      <div className="border-b border-border px-4 py-3">
+        <div className="text-[13px] font-semibold text-text-primary">{title}</div>
+      </div>
+      {rows.length ? rows.map(render) : <div className="px-4 py-6 text-[13px] text-text-muted">{empty}</div>}
+    </div>
+  );
+}
+
 // ── main component ────────────────────────────────────────────────────────────
 
 export default function LegalIntelligence() {
@@ -218,9 +703,10 @@ export default function LegalIntelligence() {
 
   return (
     <div className="space-y-8">
+      <LegalIntelligenceWorkspace />
 
       {/* ── Header ── */}
-      <div className="animate-slide-up">
+      <div className="animate-slide-up border-t border-border pt-8">
         <div className="mb-2 flex items-center gap-2 text-text-secondary">
           <Scale className="h-4 w-4 text-accent-gold" strokeWidth={2.4} />
           <span className="text-[12px] uppercase tracking-[0.18em]">Legal Intelligence</span>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight, Scale, Sparkles, Gauge, MessageCircle,
   Upload, DollarSign, ShieldCheck, TrendingUp, Zap,
-  CheckCircle2, Star,
+  CheckCircle2, Star, Database, RefreshCw,
 } from "lucide-react";
 
 function fmt(n) {
@@ -203,6 +203,16 @@ export default function HomePage({ onTabChange }) {
   const savings = useCountUp(47_000, 2000, 300);
   const bills   = useCountUp(4_821,  1600, 500);
   const hours   = useCountUp(350,    1400, 400);
+  const [legalStatus, setLegalStatus] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/legal-intelligence/status")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (alive) setLegalStatus(data); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   return (
     <div className="space-y-20 pb-4">
@@ -297,6 +307,35 @@ export default function HomePage({ onTabChange }) {
           </div>
         ))}
       </div>
+
+      <button
+        onClick={() => onTabChange("legal")}
+        className="animate-slide-up flex w-full items-center justify-between gap-5 rounded-2xl border-2 border-[#FF6B00]/20 bg-white px-6 py-4 text-left shadow-card transition-all hover:-translate-y-0.5 hover:border-[#FF6B00]/40 hover:shadow-card-hover"
+        style={{ animationDelay: "0.24s" }}
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#fff7ed]">
+            <Database className="h-5 w-5 text-[#FF6B00]" strokeWidth={2.4} />
+          </div>
+          <div>
+            <div className="text-[14px] font-bold text-text-primary">Legal guidance freshness</div>
+            <div className="mt-0.5 text-[12px] text-text-secondary">
+              {legalStatus?.last_checked
+                ? `Last refreshed ${new Date(legalStatus.last_checked).toLocaleString()}`
+                : "No legal source refresh has run yet"}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <div className="text-[22px] font-bold tabular-nums text-[#FF6B00]">
+              {legalStatus?.enabled_rule_count ?? 0}
+            </div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">enabled rules</div>
+          </div>
+          <RefreshCw className="h-4 w-4 text-text-muted" strokeWidth={2.3} />
+        </div>
+      </button>
 
       {/* ── How it works ── */}
       <section className="space-y-6">

@@ -1,4 +1,5 @@
 import json as _json
+import os
 import sys
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -22,7 +23,7 @@ app = FastAPI(title="Legi-Bill API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"],
 )
 
@@ -463,12 +464,63 @@ class LicenseScanRequest(BaseModel):
     options: LicenseScanOptions = Field(default_factory=LicenseScanOptions)
 
 
+class LegalIntelligenceFetchRequest(BaseModel):
+    source: str = "federal_register"
+    query: str
+    topic: str = "compliance"
+    jurisdiction: str = "US"
+    industry_tags: list[str] = Field(default_factory=list)
+    limit: int = Field(default=10, ge=1, le=100)
+    save_source: bool = True
+
+
+class LegalIntelligenceBulkImportRequest(BaseModel):
+    location: str
+    source_name: str = "bulk"
+    topic: str = "compliance"
+    jurisdiction: str = "US"
+    industry_tags: list[str] = Field(default_factory=list)
+    query_filter: str | None = None
+    limit: int | None = Field(default=100, ge=1, le=10000)
+    save_source: bool = True
+
+
+class LegalIntelligenceBulkSyncRequest(BaseModel):
+    preset_id: str | None = None
+    source: str = "govinfo"
+    dataset: str = "CFR"
+    bulk_base_url: str | None = None
+    topic: str = "compliance"
+    jurisdiction: str = "US"
+    industry_tags: list[str] = Field(default_factory=list)
+    query_filter: str | None = None
+    limit: int | None = Field(default=500, ge=1, le=10000)
+    max_files: int = Field(default=10, ge=1, le=100)
+    max_depth: int = Field(default=3, ge=0, le=10)
+    save_source: bool = True
+
+
+class LegalIntelligenceSourceSetupRequest(BaseModel):
+    industry: str | None = None
+    include_bulk: bool = True
+
+
+class LegalIntelligenceDistillRequest(BaseModel):
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    changed_only: bool = True
+    verify_citations: bool = True
+
+
+class LegalIntelligenceRulePatch(BaseModel):
+    enabled: bool | None = None
+    review_status: str | None = None
+
+
 @app.post("/api/startup/license/scan")
 def startup_license_scan(req: LicenseScanRequest):
     """Run the startup-risk license scanner with path-safe local/GitHub targets."""
-    startup_risk_root = Path(__file__).resolve().parents[1] / "startup-risk"
-    if str(startup_risk_root) not in sys.path:
-        sys.path.insert(0, str(startup_risk_root))
+    _ensure_startup_risk_path()
 
     from startup_risk.core.engine import ScanEngine
     from startup_risk.ingest.repository import RepositoryIngestor
@@ -504,6 +556,7 @@ def startup_license_scan(req: LicenseScanRequest):
         result = ScanEngine(
             ingestor=RepositoryIngestor(max_file_bytes=2_000_000),
             scanners=[scanner],
+            legal_guidance_index=_load_startup_legal_guidance_index(),
         ).scan(safe_target)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -511,6 +564,249 @@ def startup_license_scan(req: LicenseScanRequest):
         raise HTTPException(502, f"License scan failed: {exc}") from exc
 
     return _json.loads(result_to_json(result))
+
+
+@app.get("/api/legal-intelligence/status")
+def legal_intelligence_status():
+    store = _legal_intelligence_store()
+    return store.status()
+
+
+@app.get("/api/legal-intelligence/sources")
+def legal_intelligence_sources():
+    store = _legal_intelligence_store()
+    return {
+        "sources": [source.model_dump(mode="json") for source in store.load_source_queries()],
+        "authorities": [authority.model_dump(mode="json") for authority in store.load_authorities()],
+    }
+
+
+@app.get("/api/legal-intelligence/rules")
+def legal_intelligence_rules():
+    store = _legal_intelligence_store()
+    return {"rules": [rule.model_dump(mode="json") for rule in store.load_rules()]}
+
+
+@app.get("/api/legal-intelligence/catalog")
+def legal_intelligence_catalog():
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import all_source_presets
+
+    return all_source_presets()
+
+
+@app.post("/api/legal-intelligence/source-setup")
+def legal_intelligence_source_setup(req: LegalIntelligenceSourceSetupRequest):
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import bulk_source_presets_for_industry, public_source_presets_for_industry
+
+    store = _legal_intelligence_store()
+    public_presets = public_source_presets_for_industry(req.industry)
+    bulk_presets = bulk_source_presets_for_industry(req.industry) if req.include_bulk else []
+    for source_preset in public_presets:
+        store.append_source_query(source_preset.to_source_query())
+    for bulk_preset in bulk_presets:
+        store.append_source_query(bulk_preset.to_source_query())
+    return {
+        "public_source_count": len(public_presets),
+        "bulk_source_count": len(bulk_presets),
+        "sources": [source.model_dump(mode="json") for source in store.load_source_queries()],
+    }
+
+
+@app.post("/api/legal-intelligence/fetch")
+def legal_intelligence_fetch(req: LegalIntelligenceFetchRequest):
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import fetch_public_legal_authorities, make_source_query
+
+    store = _legal_intelligence_store()
+    authorities = fetch_public_legal_authorities(
+        source=req.source,
+        query=req.query,
+        limit=req.limit,
+        topic=req.topic,
+        jurisdiction=req.jurisdiction,
+    )
+    authorities = [
+        authority.model_copy(
+            update={
+                "metadata": {
+                    **authority.metadata,
+                    "industry_tags": req.industry_tags,
+                }
+            }
+        )
+        for authority in authorities
+    ]
+    changed = store.upsert_authorities(authorities)
+    if req.save_source:
+        store.append_source_query(
+            make_source_query(
+                source=req.source,
+                query=req.query,
+                topic=req.topic,
+                jurisdiction=req.jurisdiction,
+                industry_tags=req.industry_tags,
+                limit=req.limit,
+            )
+        )
+    return {
+        "fetched_count": len(authorities),
+        "changed_count": len(changed),
+        "authorities": [authority.model_dump(mode="json") for authority in authorities],
+    }
+
+
+@app.post("/api/legal-intelligence/bulk-import")
+def legal_intelligence_bulk_import(req: LegalIntelligenceBulkImportRequest):
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import import_bulk_legal_authorities, make_source_query
+
+    store = _legal_intelligence_store()
+    authorities = import_bulk_legal_authorities(
+        location=req.location,
+        source=req.source_name,
+        topic=req.topic,
+        jurisdiction=req.jurisdiction,
+        industry_tags=req.industry_tags,
+        query=req.query_filter,
+        limit=req.limit,
+    )
+    changed = store.upsert_authorities(authorities)
+    if req.save_source:
+        store.append_source_query(
+            make_source_query(
+                source="bulk",
+                query=req.location,
+                topic=req.topic,
+                jurisdiction=req.jurisdiction,
+                industry_tags=req.industry_tags,
+                limit=req.limit or 100,
+            )
+        )
+    return {
+        "imported_count": len(authorities),
+        "changed_count": len(changed),
+        "authorities": [authority.model_dump(mode="json") for authority in authorities[:100]],
+    }
+
+
+@app.post("/api/legal-intelligence/bulk-sync")
+def legal_intelligence_bulk_sync(req: LegalIntelligenceBulkSyncRequest):
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import get_bulk_source_preset, make_source_query, sync_bulk_source_preset, sync_bulk_legal_authorities
+
+    store = _legal_intelligence_store()
+    try:
+        if req.preset_id:
+            preset = get_bulk_source_preset(req.preset_id)
+            result = sync_bulk_source_preset(req.preset_id, limit=req.limit, max_files=req.max_files)
+            save_query = make_source_query(
+                source="bulk_sync",
+                query=req.preset_id,
+                topic=preset.topic,
+                jurisdiction=preset.jurisdiction,
+                industry_tags=list(preset.industry_tags),
+                limit=min(req.limit or preset.limit, 10000),
+            )
+        else:
+            result = sync_bulk_legal_authorities(
+                source=req.source,
+                dataset=req.dataset,
+                bulk_base_url=req.bulk_base_url,
+                topic=req.topic,
+                jurisdiction=req.jurisdiction,
+                industry_tags=req.industry_tags,
+                query=req.query_filter,
+                limit=req.limit,
+                max_files=req.max_files,
+                max_depth=req.max_depth,
+            )
+            save_query = None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(400, f"Unknown legal bulk source preset: {req.preset_id}") from exc
+
+    changed = store.upsert_authorities(result.authorities)
+    if req.save_source:
+        if save_query is not None:
+            store.append_source_query(save_query)
+        else:
+            for location in result.discovered_locations:
+                store.append_source_query(
+                    make_source_query(
+                        source="bulk",
+                        query=location,
+                        topic=req.topic,
+                        jurisdiction=req.jurisdiction,
+                        industry_tags=req.industry_tags,
+                        limit=min(req.limit or 100, 10000),
+                    )
+                )
+    return {
+        "source": result.source,
+        "dataset": result.dataset,
+        "seed_locations": result.seed_locations,
+        "discovered_locations": result.discovered_locations,
+        "imported_count": len(result.authorities),
+        "changed_count": len(changed),
+        "authorities": [authority.model_dump(mode="json") for authority in result.authorities[:100]],
+    }
+
+
+@app.post("/api/legal-intelligence/distill")
+def legal_intelligence_distill(req: LegalIntelligenceDistillRequest):
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import distill_legal_guidance, verify_guidance_citations
+
+    store = _legal_intelligence_store()
+    authorities = store.load_authorities()
+    if req.changed_only:
+        existing_hashes = {rule.source_hash for rule in store.load_rules() if rule.source_hash}
+        authorities = [authority for authority in authorities if authority.content_hash not in existing_hashes]
+    rules = distill_legal_guidance(
+        authorities,
+        provider=req.llm_provider,
+        model=req.llm_model,
+    )
+    if req.verify_citations:
+        rules = verify_guidance_citations(rules)
+    store.append_rules(rules)
+    return {"rule_count": len(rules), "rules": [rule.model_dump(mode="json") for rule in rules]}
+
+
+@app.post("/api/legal-intelligence/pipeline")
+def legal_intelligence_pipeline(req: LegalIntelligenceDistillRequest):
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import run_legal_pipeline
+
+    store = _legal_intelligence_store()
+    return run_legal_pipeline(
+        store,
+        provider=req.llm_provider,
+        model=req.llm_model,
+        changed_only=req.changed_only,
+        verify_citations=req.verify_citations,
+    )
+
+
+@app.patch("/api/legal-intelligence/rules/{rule_id}")
+def legal_intelligence_patch_rule(rule_id: str, req: LegalIntelligenceRulePatch):
+    updates = {}
+    if req.enabled is not None:
+        updates["enabled"] = req.enabled
+    if req.review_status is not None:
+        if req.review_status not in {"pending", "approved", "rejected"}:
+            raise HTTPException(400, "review_status must be pending, approved, or rejected.")
+        updates["review_status"] = req.review_status
+    if not updates:
+        raise HTTPException(400, "No rule updates provided.")
+    try:
+        rule = _legal_intelligence_store().update_rule(rule_id, **updates)
+    except KeyError as exc:
+        raise HTTPException(404, f"Rule {rule_id} not found.") from exc
+    return rule.model_dump(mode="json")
 
 
 @app.post("/api/startup/summary")
@@ -1133,9 +1429,7 @@ def scan_repo(req: RepoScanRequest):
     import time
     import re as _re
 
-    startup_risk_root = Path(__file__).resolve().parents[1] / "startup-risk"
-    if str(startup_risk_root) not in sys.path:
-        sys.path.insert(0, str(startup_risk_root))
+    _ensure_startup_risk_path()
 
     try:
         from startup_risk.core.engine import ScanEngine
@@ -1160,6 +1454,13 @@ def scan_repo(req: RepoScanRequest):
         result = ScanEngine(
             ingestor=RepositoryIngestor(),
             scanners=scanners,
+            legal_guidance_index=_load_startup_legal_guidance_index(
+                {
+                    "industry": req.industry,
+                    "product_name": req.product_name,
+                    **(req.questionnaire or {}),
+                }
+            ),
         ).scan(req.repo_url.strip())
     except Exception as exc:
         raise HTTPException(502, f"Scan failed: {exc}") from exc
@@ -1184,6 +1485,7 @@ def scan_repo(req: RepoScanRequest):
             "severity": f.severity,
             "confidence": f.confidence,
             "evidence": evidence,
+            "legal_context": [ctx.model_dump(mode="json") for ctx in getattr(f, "legal_context", [])],
             "recommendation": f.recommendation,
             "scanner": f.scanner_id,
         }
@@ -1215,3 +1517,29 @@ def scan_repo(req: RepoScanRequest):
         "our_vuln_count": our_vulns,
         "our_secret_count": our_secrets,
     }
+
+
+def _ensure_startup_risk_path() -> None:
+    startup_risk_root = Path(__file__).resolve().parents[1] / "startup-risk"
+    if str(startup_risk_root) not in sys.path:
+        sys.path.insert(0, str(startup_risk_root))
+
+
+def _legal_intelligence_store():
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import LegalIntelligenceStore
+
+    store_dir = os.getenv("STARTUP_RISK_LEGAL_INTELLIGENCE_DIR")
+    if not store_dir:
+        store_dir = str(Path(__file__).resolve().parents[1] / ".startup-risk" / "legal-intelligence")
+    return LegalIntelligenceStore(store_dir)
+
+
+def _load_startup_legal_guidance_index(profile: dict | None = None):
+    try:
+        from startup_risk.legal_intelligence import LegalGuidanceIndex
+
+        rules = _legal_intelligence_store().load_rules()
+        return LegalGuidanceIndex(rules, profile=profile) if rules else None
+    except Exception:
+        return None

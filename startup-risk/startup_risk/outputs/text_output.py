@@ -21,7 +21,7 @@ def render_text(result: ScanResult) -> Table:
             finding.severity,
             finding.id,
             _primary_path(finding),
-            finding.description,
+            _description(finding),
         )
 
     return table
@@ -32,3 +32,12 @@ def _primary_path(finding) -> str:
         if evidence.location is not None:
             return evidence.location.path
     return "-"
+
+
+def _description(finding) -> str:
+    if not finding.legal_context:
+        return finding.description
+    context = finding.legal_context[0]
+    citation = context.citations[0] if context.citations else None
+    citation_text = citation.citation or citation.title if citation else "legal guidance"
+    return f"{finding.description}\nLegal context: {context.why_it_matters} Source: {citation_text}"

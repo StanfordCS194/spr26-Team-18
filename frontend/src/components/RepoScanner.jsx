@@ -158,7 +158,7 @@ function FindingCard({ finding }) {
         <div className="px-5 pb-4 space-y-3 border-t border-border/40 pt-3">
           {finding.evidence && finding.evidence.length > 0 && (
             <div>
-              <div className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">Evidence</div>
+              <div className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">Repo evidence</div>
               <div className="space-y-1.5">
                 {finding.evidence.map((ev, i) => {
                   const loc = evidenceLocation(ev);
@@ -175,6 +175,37 @@ function FindingCard({ finding }) {
                       {ev.description && (
                         <div className="text-text-secondary text-[11px]">{ev.description}</div>
                       )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {finding.legal_context && finding.legal_context.length > 0 && (
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">Legal context</div>
+              <div className="space-y-1.5">
+                {finding.legal_context.map((ctx, i) => {
+                  const citation = ctx.citations?.[0];
+                  return (
+                    <div key={ctx.rule_id || i} className="rounded-lg border border-accent-gold/30 bg-accent-gold/10 px-3 py-2 text-[12px]">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-semibold text-text-primary">{ctx.confidence || "low"} confidence</span>
+                        {ctx.source_interpretation && (
+                          <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-text-muted">
+                            interpretation
+                          </span>
+                        )}
+                        {citation?.url ? (
+                          <a href={citation.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent-gold hover:underline">
+                            {citation.citation || citation.title}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : citation ? (
+                          <span className="text-text-muted">{citation.citation || citation.title}</span>
+                        ) : null}
+                      </div>
+                      <p className="mt-1 text-text-secondary leading-relaxed">{ctx.why_it_matters || ctx.legal_basis}</p>
                     </div>
                   );
                 })}
@@ -775,4 +806,3 @@ export default function RepoScanner({
     />
   );
 }
-

@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from startup_risk.core.models import Finding, RepositoryInventory, ScanResult
 from startup_risk.ingest.repository import RepositoryIngestor
+from startup_risk.legal_intelligence.enrich import LegalGuidanceIndex, enrich_findings
 from startup_risk.scanners.base import InventoryScanner, Scanner
 from startup_risk.scanners.registry import default_inventory_scanner
 
@@ -27,11 +28,13 @@ class ScanEngine:
         ingestor: RepositoryIngestor,
         scanners: Iterable[Scanner],
         inventory_scanner: InventoryScanner | None = None,
+        legal_guidance_index: LegalGuidanceIndex | None = None,
         max_workers: int = _DEFAULT_MAX_WORKERS,
     ) -> None:
         self._ingestor = ingestor
         self._scanners = list(scanners)
         self._inventory_scanner = inventory_scanner or default_inventory_scanner()
+        self._legal_guidance_index = legal_guidance_index
         self._max_workers = max_workers
         self._validate_scanner(self._inventory_scanner)
         for scanner in self._scanners:
@@ -54,6 +57,9 @@ class ScanEngine:
                 ):
                     findings.extend(scanner_findings)
 
+        if self._legal_guidance_index is not None:
+            findings = enrich_findings(findings, self._legal_guidance_index)
+
         return ScanResult.from_findings(
             source=snapshot.source,
             inventory=inventory,
@@ -63,7 +69,9 @@ class ScanEngine:
     def _run_scanner(self, scanner: Scanner, snapshot) -> list[Finding]:
         try:
             scanner_findings = scanner.scan(snapshot)
-        except Exception:
+        except Exception as exc:
+            if exc.__class__.__name__.endswith("ConfigError"):
+                raise
             # Runtime failure (LLM error, timeout, rate limit, parse bug): isolate it.
             logger.exception("scanner %s failed; skipping its findings", getattr(scanner, "id", "?"))
             return []

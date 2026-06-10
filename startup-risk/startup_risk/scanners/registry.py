@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from startup_risk.scanners.accessibility_scanner import AccessibilityScanner
 from startup_risk.scanners.ai_governance_scanner import AIGovernanceScanner
 from startup_risk.scanners.analytics_privacy import AnalyticsPrivacyScanner
 from startup_risk.scanners.crypto_misuse_scanner import CryptoMisuseScanner
@@ -69,6 +70,7 @@ def default_scanners(
         AnalyticsPrivacyScanner(),
         AIGovernanceScanner(),
         CryptoMisuseScanner(),
+        AccessibilityScanner(),
         CodeComplianceScanner(),
         # LLM reasoning agents. Each is no-op safe: returns [] without an LLM key.
         AuthAccessControlAgent(),

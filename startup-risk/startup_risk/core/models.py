@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
@@ -157,6 +157,28 @@ class LegalFindingContext(BaseModel):
     citations: list[LegalCitation] = Field(default_factory=list)
     confidence: Confidence = "low"
     source_interpretation: bool = True
+
+
+class ScannerLegalGuidance(BaseModel):
+    """Bounded legal guidance supplied to scanners before findings are created."""
+
+    rule_id: str
+    category: str
+    title: str
+    legal_basis: str
+    risk_signal: str
+    detection_hints: list[str] = Field(default_factory=list)
+    recommendation: str
+    citations: list[LegalCitation] = Field(default_factory=list)
+    confidence: Confidence = "low"
+    source_interpretation: bool = True
+
+
+class ScanContext(BaseModel):
+    """Optional execution context for scanners that can use profile/legal guidance."""
+
+    profile: dict[str, Any] = Field(default_factory=dict)
+    legal_guidance: list[ScannerLegalGuidance] = Field(default_factory=list)
 
 
 class Finding(BaseModel):

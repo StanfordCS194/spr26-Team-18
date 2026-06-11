@@ -50,6 +50,35 @@ def get_conn():
     return _conn
 
 
+def _workspace_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _ensure_startup_risk_path() -> None:
+    startup_risk_path = _workspace_root() / "startup-risk"
+    if startup_risk_path.exists():
+        path_text = str(startup_risk_path)
+        if path_text not in sys.path:
+            sys.path.insert(0, path_text)
+
+
+def _legal_intelligence_store():
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import LegalIntelligenceStore
+
+    configured = os.getenv("STARTUP_RISK_LEGAL_INTELLIGENCE_DIR")
+    store_dir = Path(configured) if configured else _workspace_root() / ".startup-risk" / "legal-intelligence"
+    return LegalIntelligenceStore(store_dir)
+
+
+def _load_startup_legal_guidance_index(profile: dict | None = None):
+    _ensure_startup_risk_path()
+    from startup_risk.legal_intelligence import LegalGuidanceIndex
+
+    rules = _legal_intelligence_store().load_rules()
+    return LegalGuidanceIndex(rules, profile=profile) if rules else None
+
+
 @app.get("/api/bills")
 def list_bills(session: Optional[int] = None):
     bills = get_all_bills(get_conn(), session_year=session)
@@ -1681,6 +1710,11 @@ def scan_repo(req: RepoScanRequest):
 
     start = time.time()
     try:
+        scan_profile = {
+            "industry": req.industry,
+            "product_name": req.product_name,
+            **(req.questionnaire or {}),
+        }
         scanners = default_scanners(
             deterministic_license_only=True,
             vuln_osv=req.vuln_osv,
@@ -1691,13 +1725,8 @@ def scan_repo(req: RepoScanRequest):
         result = ScanEngine(
             ingestor=RepositoryIngestor(),
             scanners=scanners,
-            legal_guidance_index=_load_startup_legal_guidance_index(
-                {
-                    "industry": req.industry,
-                    "product_name": req.product_name,
-                    **(req.questionnaire or {}),
-                }
-            ),
+            legal_guidance_index=_load_startup_legal_guidance_index(scan_profile),
+            scan_profile=scan_profile,
         ).scan(req.repo_url.strip())
     except Exception as exc:
         raise HTTPException(502, f"Scan failed: {exc}") from exc

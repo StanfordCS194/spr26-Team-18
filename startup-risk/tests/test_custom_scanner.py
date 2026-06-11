@@ -3,7 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from startup_risk.core.models import FileSnapshot, RepositorySnapshot, RepositorySource
+from startup_risk.core.models import (
+    FileSnapshot,
+    LegalCitation,
+    RepositorySnapshot,
+    RepositorySource,
+    ScanContext,
+    ScannerLegalGuidance,
+)
 from startup_risk.scanners.custom_scanner import CustomScanner, _weight_to_severity
 
 
@@ -98,6 +105,42 @@ def test_failed_rules_become_findings():
     assert f.evidence[0].location.path == "src/app.py"
     # Two LLM calls: generate rules, then grade.
     assert len(fake.calls) == 2
+
+
+def test_profile_and_legal_context_are_included_in_custom_scanner_prompts():
+    results = {
+        "results": [
+            {"id": "soc2_audit_logging", "passed": False, "observed": "missing", "evidence_path": "src/app.py"},
+            {"id": "data_residency", "passed": True, "observed": "ok", "evidence_path": None},
+        ]
+    }
+    fake = _FakeLLM(_RULES, results)
+    scanner = CustomScanner(questionnaire=_QUESTIONNAIRE, llm=fake)
+    context = ScanContext(
+        profile={"industry": "fintech", "stage": "seed", "customers": "enterprise"},
+        legal_guidance=[
+            ScannerLegalGuidance(
+                rule_id="legal_guidance.audit",
+                category="security_controls",
+                title="Audit controls expected",
+                legal_basis="Agency guidance expects audit controls.",
+                risk_signal="missing audit trail",
+                recommendation="Add audit controls.",
+                citations=[LegalCitation(title="Agency guidance", citation="AG-1")],
+                confidence="medium",
+            )
+        ],
+    )
+
+    findings = scanner.scan_with_context(_snapshot(("src/app.py", "x = 1")), context)
+
+    assert len(findings) == 1
+    assert len(fake.calls) == 2
+    for _, prompt in fake.calls:
+        assert "Startup profile context:" in prompt
+        assert "- Industry: fintech" in prompt
+        assert "Legal guidance context:" in prompt
+        assert "Audit controls expected" in prompt
 
 
 def test_evidence_path_outside_snapshot_is_dropped():

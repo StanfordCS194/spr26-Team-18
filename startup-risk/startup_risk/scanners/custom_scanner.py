@@ -13,9 +13,11 @@ from startup_risk.core.models import (
     Finding,
     FindingEvidence,
     RepositorySnapshot,
+    ScanContext,
     Severity,
     SourceLocation,
 )
+from startup_risk.core.profile_context import format_startup_profile_context
 
 # An injectable LLM completion function: (system_prompt, user_prompt) -> raw text.
 # The default implementation calls OpenAI; tests inject a fake to stay offline.
@@ -106,17 +108,24 @@ class CustomScanner:
         return has_input and has_llm
 
     def scan(self, snapshot: RepositorySnapshot) -> list[Finding]:
+        return self._scan(snapshot, context=None)
+
+    def scan_with_context(self, snapshot: RepositorySnapshot, context: ScanContext) -> list[Finding]:
+        return self._scan(snapshot, context=context)
+
+    def _scan(self, snapshot: RepositorySnapshot, *, context: ScanContext | None) -> list[Finding]:
         if not self.enabled:
             return []
 
         complete = self._llm or self._default_llm
         repo_facts = self._summarize_repo(snapshot)
+        scan_context = self._context_prompt(context)
 
-        rules = self._generate_rules(complete, repo_facts)
+        rules = self._generate_rules(complete, repo_facts, scan_context)
         if not rules:
             return []
 
-        graded = self._grade(complete, rules, snapshot, repo_facts)
+        graded = self._grade(complete, rules, snapshot, repo_facts, scan_context)
         return self._to_findings(graded, snapshot)
 
     # ── prompt building ─────────────────────────────────────────────────────
@@ -145,17 +154,25 @@ class CustomScanner:
             lines += ["", "README excerpt:", readme.text[:1200]]
         return "\n".join(lines)
 
-    def _rules_user_prompt(self, repo_facts: str) -> str:
+    def _rules_user_prompt(self, repo_facts: str, legal_context: str = "") -> str:
         lines = ["Founder questionnaire:"]
         for key, value in self._questionnaire.items():
             if value:
                 lines.append(f"  - {key}: {value}")
         if self._prd_text:
             lines += ["", "PRD excerpt:", self._prd_text[:4000]]
+        if legal_context:
+            lines += ["", legal_context]
         lines += ["", "Repository facts:", repo_facts]
         return "\n".join(lines)
 
-    def _grade_user_prompt(self, rules: list[dict], snapshot: RepositorySnapshot, repo_facts: str) -> str:
+    def _grade_user_prompt(
+        self,
+        rules: list[dict],
+        snapshot: RepositorySnapshot,
+        repo_facts: str,
+        legal_context: str = "",
+    ) -> str:
         lines = ["Rules to evaluate:"]
         for rule in rules:
             lines.append(
@@ -164,6 +181,8 @@ class CustomScanner:
         lines += ["", "Repository facts:", repo_facts]
         if self._prd_text:
             lines += ["", "PRD excerpt:", self._prd_text[:4000]]
+        if legal_context:
+            lines += ["", legal_context]
 
         # Provide a bounded slice of source so the grader can cite files.
         lines += ["", "Source excerpts:"]
@@ -178,10 +197,46 @@ class CustomScanner:
             lines += [f"--- {f.path} ---", excerpt]
         return "\n".join(lines)
 
+    def _context_prompt(self, context: ScanContext | None) -> str:
+        blocks = [
+            block
+            for block in (
+                format_startup_profile_context(context.profile if context else None),
+                self._legal_context_prompt(context),
+            )
+            if block
+        ]
+        return "\n\n".join(blocks)
+
+    def _legal_context_prompt(self, context: ScanContext | None) -> str:
+        if not context or not context.legal_guidance:
+            return ""
+        lines = [
+            "Legal guidance context:",
+            "Use this source-backed legal context only to focus the custom rules and grading.",
+            "Do not invent repository facts, citations, obligations, files, or line numbers.",
+            "A failed rule still needs support from the questionnaire, PRD, repository facts, or source excerpts.",
+        ]
+        for index, guidance in enumerate(context.legal_guidance[:5], start=1):
+            citations = "; ".join(
+                citation.citation or citation.title
+                for citation in guidance.citations[:2]
+                if citation.citation or citation.title
+            )
+            citation_text = f" | citations: {citations}" if citations else ""
+            hints = ", ".join(guidance.detection_hints[:4])
+            hint_text = f" | hints: {hints}" if hints else ""
+            lines.append(
+                f"{index}. [{guidance.category}] {guidance.title} "
+                f"(confidence: {guidance.confidence}) | legal basis: {guidance.legal_basis} "
+                f"| risk signal: {guidance.risk_signal}{hint_text}{citation_text}"
+            )
+        return "\n".join(lines)
+
     # ── LLM steps ───────────────────────────────────────────────────────────
 
-    def _generate_rules(self, complete: LLMComplete, repo_facts: str) -> list[dict]:
-        raw = complete(_RULES_SYSTEM, self._rules_user_prompt(repo_facts))
+    def _generate_rules(self, complete: LLMComplete, repo_facts: str, legal_context: str = "") -> list[dict]:
+        raw = complete(_RULES_SYSTEM, self._rules_user_prompt(repo_facts, legal_context))
         parsed = _safe_json(raw)
         rules = parsed.get("rules") if isinstance(parsed, dict) else None
         if not isinstance(rules, list):
@@ -208,8 +263,9 @@ class CustomScanner:
         rules: list[dict],
         snapshot: RepositorySnapshot,
         repo_facts: str,
+        legal_context: str = "",
     ) -> list[dict]:
-        raw = complete(_GRADE_SYSTEM, self._grade_user_prompt(rules, snapshot, repo_facts))
+        raw = complete(_GRADE_SYSTEM, self._grade_user_prompt(rules, snapshot, repo_facts, legal_context))
         parsed = _safe_json(raw)
         results = parsed.get("results") if isinstance(parsed, dict) else None
         by_id = {

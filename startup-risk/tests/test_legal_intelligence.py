@@ -455,6 +455,111 @@ def test_profile_targeting_limits_industry_specific_rules():
     assert [rule.id for rule in index.rules] == ["legal_guidance.fintech"]
 
 
+def test_scanner_guidance_uses_all_authority_types_and_bounds_results():
+    authority_types = [
+        "regulation",
+        "agency_guidance",
+        "enforcement_action",
+        "court_decision",
+        "bill",
+        "statute",
+    ]
+    rules = [
+        LegalGuidanceRule(
+            id=f"legal_guidance.{authority_type}",
+            authority_id=f"authority-{authority_type}",
+            category="privacy",
+            title=f"{authority_type} privacy rule",
+            legal_basis="Privacy authority requires safeguards for personal data.",
+            risk_signal="personal data tracking analytics",
+            detection_hints=["personal data", "tracking"],
+            finding_rationale="Privacy context matters.",
+            recommendation="Review privacy controls.",
+            citations=[
+                LegalCitation(
+                    title=f"{authority_type} source",
+                    citation=authority_type,
+                    authority_type=authority_type,
+                )
+            ],
+            confidence="medium",
+        )
+        for authority_type in authority_types
+    ]
+
+    index = LegalGuidanceIndex(rules)
+    guidance = index.guidance_for_scanner(
+        scanner_id="pii_data_flow",
+        scanner_category="data_privacy",
+        scanner_name="PII Data-Flow Agent",
+        limit=10,
+    )
+    bounded = index.guidance_for_scanner(
+        scanner_id="pii_data_flow",
+        scanner_category="data_privacy",
+        scanner_name="PII Data-Flow Agent",
+        limit=4,
+    )
+
+    assert len(guidance) == len(authority_types)
+    returned_types = {item.citations[0].authority_type for item in guidance}
+    assert returned_types == set(authority_types)
+    assert len(bounded) == 4
+
+
+def test_scanner_guidance_filters_rejected_disabled_and_profile_rules():
+    base = LegalGuidanceRule(
+        id="legal_guidance.fintech",
+        authority_id="authority",
+        category="financial_compliance",
+        title="Financial privacy",
+        legal_basis="Financial privacy basis.",
+        risk_signal="payment privacy audit logs",
+        finding_rationale="Financial privacy matters.",
+        recommendation="Review financial privacy.",
+        citations=[LegalCitation(title="Authority", citation="A")],
+        confidence="high",
+        industry_tags=["fintech"],
+    )
+    disabled = base.model_copy(update={"id": "legal_guidance.disabled", "enabled": False})
+    rejected = base.model_copy(update={"id": "legal_guidance.rejected", "review_status": "rejected"})
+    health = base.model_copy(update={"id": "legal_guidance.health", "industry_tags": ["healthcare"]})
+
+    guidance = LegalGuidanceIndex(
+        [base, disabled, rejected, health],
+        profile={"industry": "fintech"},
+    ).guidance_for_scanner(
+        scanner_id="financial_compliance",
+        scanner_category="financial_compliance",
+        scanner_name="Financial Compliance Scanner",
+    )
+
+    assert [item.rule_id for item in guidance] == ["legal_guidance.fintech"]
+
+
+def test_scanner_guidance_matches_declared_scanner_categories():
+    rule = LegalGuidanceRule(
+        id="legal_guidance.scanner_category",
+        authority_id="authority",
+        category="compliance",
+        title="Privacy safeguards",
+        legal_basis="Privacy safeguard basis.",
+        risk_signal="personal data handling",
+        finding_rationale="Privacy safeguards matter.",
+        recommendation="Review privacy safeguards.",
+        citations=[LegalCitation(title="Authority", citation="A")],
+        confidence="medium",
+        scanner_categories=["privacy"],
+    )
+
+    guidance = LegalGuidanceIndex([rule]).guidance_for_scanner(
+        scanner_id="pii_data_flow",
+        scanner_category="data_privacy",
+    )
+
+    assert [item.rule_id for item in guidance] == ["legal_guidance.scanner_category"]
+
+
 def test_citation_verification_downgrades_unsupported_rules():
     rule = LegalGuidanceRule(
         id="legal_guidance.unverified",

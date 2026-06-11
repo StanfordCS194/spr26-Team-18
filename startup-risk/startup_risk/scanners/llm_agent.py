@@ -12,6 +12,7 @@ from startup_risk.core.models import (
     Finding,
     FindingEvidence,
     RepositorySnapshot,
+    ScanContext,
     SourceLocation,
 )
 
@@ -103,15 +104,23 @@ class LLMAgent:
         return f"{self.system}\n{_FINDING_SCHEMA}"
 
     def scan(self, snapshot: RepositorySnapshot) -> list[Finding]:
+        return self._scan(snapshot, context=None)
+
+    def scan_with_context(self, snapshot: RepositorySnapshot, context: ScanContext) -> list[Finding]:
+        return self._scan(snapshot, context=context)
+
+    def _scan(self, snapshot: RepositorySnapshot, *, context: ScanContext | None) -> list[Finding]:
         if not self.enabled:
             return []
         complete = self._llm or self._default_llm
         valid_paths = {f.path for f in snapshot.files}
+        context_prefix = self._legal_context_prompt(context)
 
         findings: list[Finding] = []
         seen: set[str] = set()
         for chunk in self._chunks(snapshot):
-            for item in self._parse(complete(self.system_prompt, chunk)):
+            user_prompt = f"{context_prefix}\n\n{chunk}" if context_prefix else chunk
+            for item in self._parse(complete(self.system_prompt, user_prompt)):
                 finding = self._to_finding(item, valid_paths)
                 if finding is not None and finding.id not in seen:
                     seen.add(finding.id)
@@ -149,6 +158,31 @@ class LLMAgent:
         lines = file.text[: self._max_file_chars].splitlines()
         numbered = "\n".join(f"{i + 1}: {line}" for i, line in enumerate(lines))
         return f"=== FILE: {file.path} ===\n{numbered}"
+
+    def _legal_context_prompt(self, context: ScanContext | None) -> str:
+        if not context or not context.legal_guidance:
+            return ""
+        lines = [
+            "Legal guidance context:",
+            "Use this source-backed legal context only to focus review priorities.",
+            "Do not invent repository facts, citations, obligations, files, or line numbers.",
+            "Only report findings supported by concrete file and line evidence in the source files below.",
+        ]
+        for index, guidance in enumerate(context.legal_guidance[:5], start=1):
+            citations = "; ".join(
+                citation.citation or citation.title
+                for citation in guidance.citations[:2]
+                if citation.citation or citation.title
+            )
+            citation_text = f" | citations: {citations}" if citations else ""
+            hints = ", ".join(guidance.detection_hints[:4])
+            hint_text = f" | hints: {hints}" if hints else ""
+            lines.append(
+                f"{index}. [{guidance.category}] {guidance.title} "
+                f"(confidence: {guidance.confidence}) | legal basis: {guidance.legal_basis} "
+                f"| risk signal: {guidance.risk_signal}{hint_text}{citation_text}"
+            )
+        return "\n".join(lines)
 
     # ── parsing / finding assembly ─────────────────────────────────────────────
 

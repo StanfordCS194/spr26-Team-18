@@ -1,20 +1,23 @@
 from __future__ import annotations
 
-from startup_risk.core.models import Finding, LegalFindingContext
+from startup_risk.core.models import Finding, LegalFindingContext, ScannerLegalGuidance
 from startup_risk.legal_intelligence.models import LegalGuidanceRule
 
 
 _CATEGORY_ALIASES: dict[str, set[str]] = {
-    "privacy": {"privacy", "analytics_privacy", "pii_data_flow", "code_compliance"},
+    "privacy": {"privacy", "analytics_privacy", "pii_data_flow", "data_privacy", "code_compliance"},
     "financial_compliance": {"financial_compliance"},
     "employment_payroll": {"financial_compliance", "legal"},
     "security_controls": {
         "secrets",
         "secret",
         "auth_access_control",
+        "access_control",
         "infra_misconfig",
+        "infrastructure",
         "cicd_security",
         "rate_limit",
+        "rate_limiting",
         "error_disclosure",
         "code_compliance",
     },
@@ -31,6 +34,7 @@ class LegalGuidanceIndex:
     """In-memory matcher from scanner findings to distilled legal guidance."""
 
     def __init__(self, rules: list[LegalGuidanceRule], *, profile: dict | None = None) -> None:
+        self.profile = profile or {}
         profile_tags = _profile_tags(profile)
         self.rules = [
             rule
@@ -38,6 +42,34 @@ class LegalGuidanceIndex:
             if rule.enabled
             and rule.review_status != "rejected"
             and _rule_matches_profile(rule, profile_tags)
+        ]
+
+    def guidance_for_scanner(
+        self,
+        *,
+        scanner_id: str,
+        scanner_category: str | None = None,
+        scanner_name: str | None = None,
+        limit: int = 5,
+    ) -> list[ScannerLegalGuidance]:
+        """Return bounded legal guidance for a scanner before it emits findings."""
+
+        scanner_values = {
+            value.lower()
+            for value in (scanner_id, scanner_category, scanner_name)
+            if value
+        }
+        haystack = " ".join(scanner_values)
+        scored: list[tuple[int, LegalGuidanceRule]] = []
+        for rule in self.rules:
+            score = _scanner_category_score(rule, scanner_values)
+            score += _keyword_score(rule, haystack)
+            if score > 0:
+                scored.append((score, rule))
+
+        return [
+            _scanner_guidance_from_rule(rule)
+            for _, rule in sorted(scored, key=lambda item: (-item[0], item[1].id))[:limit]
         ]
 
     def match_finding(self, finding: Finding, *, limit: int = 3) -> list[LegalFindingContext]:
@@ -80,6 +112,17 @@ def _category_score(rule: LegalGuidanceRule, finding: Finding) -> int:
     aliases = _CATEGORY_ALIASES.get(rule.category, {rule.category})
     finding_values = {finding.category.lower(), finding.scanner_id.lower()}
     return 8 if aliases & finding_values else 0
+
+
+def _scanner_category_score(rule: LegalGuidanceRule, scanner_values: set[str]) -> int:
+    aliases = _CATEGORY_ALIASES.get(rule.category, {rule.category})
+    score = 8 if aliases & scanner_values else 0
+    for category in rule.scanner_categories:
+        normalized = category.lower()
+        category_aliases = _CATEGORY_ALIASES.get(normalized, {normalized})
+        if category_aliases & scanner_values:
+            score += 8
+    return min(score, 12)
 
 
 def _keyword_score(rule: LegalGuidanceRule, haystack: str) -> int:
@@ -137,3 +180,18 @@ def _rule_matches_profile(rule: LegalGuidanceRule, profile_tags: set[str]) -> bo
         return True
     rule_tags = {tag.lower() for tag in rule.industry_tags}
     return bool(rule_tags & profile_tags)
+
+
+def _scanner_guidance_from_rule(rule: LegalGuidanceRule) -> ScannerLegalGuidance:
+    return ScannerLegalGuidance(
+        rule_id=rule.id,
+        category=rule.category,
+        title=rule.title[:160],
+        legal_basis=rule.legal_basis[:700],
+        risk_signal=rule.risk_signal[:500],
+        detection_hints=[hint[:180] for hint in rule.detection_hints[:6]],
+        recommendation=rule.recommendation[:300],
+        citations=rule.citations[:3],
+        confidence=rule.confidence,
+        source_interpretation=rule.source_interpretation,
+    )

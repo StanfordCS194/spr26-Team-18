@@ -1710,6 +1710,11 @@ def scan_repo(req: RepoScanRequest):
 
     start = time.time()
     try:
+        scan_profile = {
+            "industry": req.industry,
+            "product_name": req.product_name,
+            **(req.questionnaire or {}),
+        }
         scanners = default_scanners(
             deterministic_license_only=True,
             vuln_osv=req.vuln_osv,
@@ -1720,13 +1725,8 @@ def scan_repo(req: RepoScanRequest):
         result = ScanEngine(
             ingestor=RepositoryIngestor(),
             scanners=scanners,
-            legal_guidance_index=_load_startup_legal_guidance_index(
-                {
-                    "industry": req.industry,
-                    "product_name": req.product_name,
-                    **(req.questionnaire or {}),
-                }
-            ),
+            legal_guidance_index=_load_startup_legal_guidance_index(scan_profile),
+            scan_profile=scan_profile,
         ).scan(req.repo_url.strip())
     except Exception as exc:
         raise HTTPException(502, f"Scan failed: {exc}") from exc

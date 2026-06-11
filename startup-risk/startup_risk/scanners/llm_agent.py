@@ -15,6 +15,7 @@ from startup_risk.core.models import (
     ScanContext,
     SourceLocation,
 )
+from startup_risk.core.profile_context import format_startup_profile_context
 
 # An injectable LLM completion function: (system_prompt, user_prompt) -> raw text.
 # The default implementation calls OpenAI; tests inject a fake to stay offline.
@@ -114,7 +115,7 @@ class LLMAgent:
             return []
         complete = self._llm or self._default_llm
         valid_paths = {f.path for f in snapshot.files}
-        context_prefix = self._legal_context_prompt(context)
+        context_prefix = self._context_prompt(context)
 
         findings: list[Finding] = []
         seen: set[str] = set()
@@ -158,6 +159,17 @@ class LLMAgent:
         lines = file.text[: self._max_file_chars].splitlines()
         numbered = "\n".join(f"{i + 1}: {line}" for i, line in enumerate(lines))
         return f"=== FILE: {file.path} ===\n{numbered}"
+
+    def _context_prompt(self, context: ScanContext | None) -> str:
+        blocks = [
+            block
+            for block in (
+                format_startup_profile_context(context.profile if context else None),
+                self._legal_context_prompt(context),
+            )
+            if block
+        ]
+        return "\n\n".join(blocks)
 
     def _legal_context_prompt(self, context: ScanContext | None) -> str:
         if not context or not context.legal_guidance:

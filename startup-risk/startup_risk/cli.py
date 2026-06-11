@@ -253,6 +253,7 @@ def scan(
         ingestor=ingestor,
         scanners=scanners,
         legal_guidance_index=_load_legal_guidance_index(legal_guidance_store, profile={"industry": industry}),
+        scan_profile={"industry": industry},
     )
 
     try:

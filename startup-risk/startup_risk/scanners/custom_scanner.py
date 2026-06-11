@@ -17,6 +17,7 @@ from startup_risk.core.models import (
     Severity,
     SourceLocation,
 )
+from startup_risk.core.profile_context import format_startup_profile_context
 
 # An injectable LLM completion function: (system_prompt, user_prompt) -> raw text.
 # The default implementation calls OpenAI; tests inject a fake to stay offline.
@@ -118,13 +119,13 @@ class CustomScanner:
 
         complete = self._llm or self._default_llm
         repo_facts = self._summarize_repo(snapshot)
-        legal_context = self._legal_context_prompt(context)
+        scan_context = self._context_prompt(context)
 
-        rules = self._generate_rules(complete, repo_facts, legal_context)
+        rules = self._generate_rules(complete, repo_facts, scan_context)
         if not rules:
             return []
 
-        graded = self._grade(complete, rules, snapshot, repo_facts, legal_context)
+        graded = self._grade(complete, rules, snapshot, repo_facts, scan_context)
         return self._to_findings(graded, snapshot)
 
     # ── prompt building ─────────────────────────────────────────────────────
@@ -195,6 +196,17 @@ class CustomScanner:
             budget -= len(excerpt)
             lines += [f"--- {f.path} ---", excerpt]
         return "\n".join(lines)
+
+    def _context_prompt(self, context: ScanContext | None) -> str:
+        blocks = [
+            block
+            for block in (
+                format_startup_profile_context(context.profile if context else None),
+                self._legal_context_prompt(context),
+            )
+            if block
+        ]
+        return "\n\n".join(blocks)
 
     def _legal_context_prompt(self, context: ScanContext | None) -> str:
         if not context or not context.legal_guidance:

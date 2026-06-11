@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 from startup_risk.core.models import Finding, RepositoryInventory, ScanContext, ScanResult
+from startup_risk.core.profile_context import adjust_findings_for_profile
 from startup_risk.ingest.repository import RepositoryIngestor
 from startup_risk.legal_intelligence.enrich import LegalGuidanceIndex, enrich_findings
 from startup_risk.scanners.base import InventoryScanner, Scanner
@@ -29,12 +31,14 @@ class ScanEngine:
         scanners: Iterable[Scanner],
         inventory_scanner: InventoryScanner | None = None,
         legal_guidance_index: LegalGuidanceIndex | None = None,
+        scan_profile: dict[str, Any] | None = None,
         max_workers: int = _DEFAULT_MAX_WORKERS,
     ) -> None:
         self._ingestor = ingestor
         self._scanners = list(scanners)
         self._inventory_scanner = inventory_scanner or default_inventory_scanner()
         self._legal_guidance_index = legal_guidance_index
+        self._scan_profile = scan_profile or (legal_guidance_index.profile if legal_guidance_index else {})
         self._max_workers = max_workers
         self._validate_scanner(self._inventory_scanner)
         for scanner in self._scanners:
@@ -59,6 +63,7 @@ class ScanEngine:
 
         if self._legal_guidance_index is not None:
             findings = enrich_findings(findings, self._legal_guidance_index)
+        findings = adjust_findings_for_profile(findings, self._scan_profile)
 
         return ScanResult.from_findings(
             source=snapshot.source,
@@ -96,9 +101,9 @@ class ScanEngine:
 
     def _context_for_scanner(self, scanner: Scanner) -> ScanContext:
         if self._legal_guidance_index is None:
-            return ScanContext()
+            return ScanContext(profile=self._scan_profile)
         return ScanContext(
-            profile=self._legal_guidance_index.profile,
+            profile=self._scan_profile,
             legal_guidance=self._legal_guidance_index.guidance_for_scanner(
                 scanner_id=scanner.id,
                 scanner_category=getattr(scanner, "category", None),

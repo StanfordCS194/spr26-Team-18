@@ -93,6 +93,47 @@ class ContextAwareContractScanner:
         ]
 
 
+class ProfileSeverityScanner:
+    id = "analytics_privacy"
+    name = "Profile Severity Scanner"
+    version = "1.0.0"
+    category = "analytics_privacy"
+
+    def __init__(
+        self,
+        severity: str = "medium",
+        category: str = "analytics_privacy",
+        scanner_id: str = "analytics_privacy",
+        title: str = "Personal data sent to analytics",
+        description: str = "The scanner found personal data sent to analytics.",
+        recommendation: str = "Review analytics data collection.",
+        excerpt: str = "analytics.identify(email)",
+    ) -> None:
+        self.id = scanner_id
+        self._severity = severity
+        self._category = category
+        self._title = title
+        self._description = description
+        self._recommendation = recommendation
+        self._excerpt = excerpt
+
+    def scan(self, snapshot: RepositorySnapshot) -> list[Finding]:
+        return [
+            Finding(
+                id=f"profile_severity.{self._severity}.{self._category}",
+                title=self._title,
+                description=self._description,
+                category=self._category,
+                severity=self._severity,
+                confidence="high",
+                evidence=[FindingEvidence(description="Static test evidence.", excerpt=self._excerpt)],
+                recommendation=self._recommendation,
+                scanner_id=self.id,
+                scanner_version=self.version,
+            )
+        ]
+
+
 def test_engine_runs_formal_scanner_contract(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -181,3 +222,63 @@ def test_engine_passes_legal_context_to_context_aware_scanner(tmp_path):
     assert scanner.received_context is not None
     assert scanner.received_context.profile == {"industry": "tech"}
     assert scanner.received_context.legal_guidance[0].rule_id == "legal_guidance.analytics"
+
+
+def test_profile_context_boosts_relevant_finding_severity_and_summary(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    result = ScanEngine(
+        ingestor=RepositoryIngestor(),
+        scanners=[ProfileSeverityScanner(severity="medium")],
+        scan_profile={"industry": "healthcare", "sensitiveData": "PHI"},
+    ).scan(str(repo))
+
+    finding = result.findings[0]
+    assert finding.severity == "high"
+    assert "Startup profile priority" in finding.description
+    assert result.summary.by_severity["high"] == 1
+    assert result.summary.by_severity["medium"] == 0
+
+
+def test_profile_context_does_not_boost_unrelated_findings(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    result = ScanEngine(
+        ingestor=RepositoryIngestor(),
+        scanners=[
+            ProfileSeverityScanner(
+                severity="medium",
+                category="dependency_supply_chain",
+                scanner_id="dependency_scanner",
+                title="Outdated dependency manifest",
+                description="The scanner found a dependency manifest hygiene issue.",
+                recommendation="Review dependency metadata.",
+                excerpt="package==1.0.0",
+            )
+        ],
+        scan_profile={"industry": "healthcare", "sensitiveData": "PHI"},
+    ).scan(str(repo))
+
+    assert result.findings[0].severity == "medium"
+    assert "Startup profile priority" not in result.findings[0].description
+
+
+def test_profile_context_does_not_boost_info_or_critical_findings(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    info_result = ScanEngine(
+        ingestor=RepositoryIngestor(),
+        scanners=[ProfileSeverityScanner(severity="info")],
+        scan_profile={"industry": "healthcare", "sensitiveData": "PHI"},
+    ).scan(str(repo))
+    critical_result = ScanEngine(
+        ingestor=RepositoryIngestor(),
+        scanners=[ProfileSeverityScanner(severity="critical")],
+        scan_profile={"industry": "healthcare", "sensitiveData": "PHI"},
+    ).scan(str(repo))
+
+    assert info_result.findings[0].severity == "info"
+    assert critical_result.findings[0].severity == "critical"

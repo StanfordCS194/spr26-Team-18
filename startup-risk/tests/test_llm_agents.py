@@ -106,12 +106,38 @@ def test_agent_prompt_includes_legal_guidance_context_when_supplied():
     assert "Only report findings supported by concrete file and line evidence" in prompt
 
 
+def test_agent_prompt_includes_bounded_profile_context_when_supplied():
+    fake = _FakeLLM([_f("src/api.py", line=4)])
+    agent = AuthAccessControlAgent(llm=fake)
+    context = ScanContext(
+        profile={
+            "industry": "fintech\npayments",
+            "product_name": "Checkout risk engine",
+            "stage": "seed",
+            "customers": "enterprise",
+            "sensitiveData": "cardholder data",
+            "unknown": "this should not appear",
+        },
+    )
+
+    findings = agent.scan_with_context(_snapshot(("src/api.py", "x\n" * 10)), context)
+
+    assert len(findings) == 1
+    prompt = fake.calls[0][1]
+    assert "Startup profile context:" in prompt
+    assert "- Industry: fintech payments" in prompt
+    assert "- Product: Checkout risk engine" in prompt
+    assert "Findings still require concrete repository evidence." in prompt
+    assert "unknown" not in prompt
+
+
 def test_agent_prompt_omits_legal_guidance_context_when_absent():
     fake = _FakeLLM([])
     agent = AuthAccessControlAgent(llm=fake)
     agent.scan(_snapshot(("src/api.py", "x = 1\n")))
 
     assert "Legal guidance context:" not in fake.calls[0][1]
+    assert "Startup profile context:" not in fake.calls[0][1]
 
 
 def test_drops_unknown_path_and_defaults_bad_severity():
